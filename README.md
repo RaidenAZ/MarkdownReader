@@ -1,6 +1,6 @@
 <div align="center">
   <img src="src/MarkdownReader/Assets/app-icon.png" width="96" height="96" alt="Folio Icon" />
-  <h1>Folio</h1>
+  <h1>MarkdownReader</h1>
   <p><strong>Living Manuscript on Mica · 面向 Windows 11 与 AI 协作时代的便携式 Markdown 阅读器</strong></p>
 </div>
 
