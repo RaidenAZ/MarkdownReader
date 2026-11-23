@@ -161,9 +161,24 @@
                                 <ui:TextBox x:Name="WorkspaceFilter" PlaceholderText="筛选文档…" FontSize="12"
                                             Margin="4,0,4,6" TextChanged="FilterWorkspace" />
                                 <TreeView x:Name="WorkspaceTree" Background="Transparent" BorderThickness="0"
-                                          SelectedItemChanged="SelectWorkspaceFile" />
+                                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                          SelectedItemChanged="SelectWorkspaceFile">
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
+                                </TreeView>
                                 <TextBlock x:Name="WorkspaceHint" Opacity="0.58" FontSize="12" Margin="10,4,6,4"
-                                           TextWrapping="Wrap" Visibility="Collapsed" />
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
                             </StackPanel>
                             <StackPanel x:Name="RecentSection">
                                 <DockPanel Margin="10,2,4,4">
@@ -199,9 +214,8 @@
                                                             <Border Width="3" Height="14" CornerRadius="1.5" Margin="0,0,8,0"
                                                                     Background="{DynamicResource AccentTextFillColorPrimaryBrush}"
                                                                     Visibility="{Binding ActiveVisibility}" />
-                                                            <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="12.5"
-                                                                       FontWeight="{Binding LabelWeight}"
-                                                                       Foreground="{Binding LabelBrush}"
+                                                            <TextBlock x:Name="RecentLabel" Grid.Column="1" Text="{Binding DisplayName}" FontSize="12.5"
+                                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                                                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                                         </Grid>
                                                     </Button>
@@ -218,8 +232,13 @@
                                                 </Grid>
                                             </Border>
                                             <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                    <Setter TargetName="RecentLabel" Property="FontWeight" Value="SemiBold" />
+                                                    <Setter TargetName="RecentLabel" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                </DataTrigger>
                                                 <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="RemoveButton" Property="Visibility" Value="Visible" />
+                                                    <Setter TargetName="RecentLabel" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                                                 </Trigger>
                                             </DataTemplate.Triggers>
                                         </DataTemplate>

@@ -40,9 +40,6 @@ public partial class MainWindow : FluentWindow
         public string Name => System.IO.Path.GetFileName(Path);
         public string DisplayName => System.IO.Path.GetFileNameWithoutExtension(Path) is { Length: > 0 } stem ? stem : Name;
         [JsonIgnore] public Visibility ActiveVisibility => IsActive ? Visibility.Visible : Visibility.Collapsed;
-        [JsonIgnore] public FontWeight LabelWeight => IsActive ? FontWeights.SemiBold : FontWeights.Normal;
-        [JsonIgnore] public Brush LabelBrush => (Brush)Application.Current.FindResource(
-            IsActive ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
     }
 
     public MainWindow(string? startupPath)
