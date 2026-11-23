@@ -1,12 +1,12 @@
 <div align="center">
   <img src="src/MarkdownReader/Assets/app-icon.png" width="96" height="96" alt="Folio Icon" />
-  <h1>Folio</h1>
+  <h1>MarkdownReader</h1>
   <p><strong>Living Manuscript on Mica · 面向 Windows 11 与 AI 协作时代的便携式 Markdown 阅读器</strong></p>
 </div>
 
 ---
 
-**Folio** 是一款专为沉浸阅读与 AI Agent 实时协作场景设计的轻量级桌面 Markdown 阅读器。它基于 **WPF-UI (Fluent 2 / Mica)** 与 **透明 WebView2 排版引擎** 构建，在零外网依赖、免安装纯绿色的前提下，提供媲美现代现代书刊的排版品质与毫秒级无感热同步体验。
+**MarkdownReader** 是一款专为沉浸阅读与 AI Agent 实时协作场景设计的轻量级桌面 Markdown 阅读器。它基于 **WPF-UI (Fluent 2 / Mica)** 与 **透明 WebView2 排版引擎** 构建，在零外网依赖、免安装纯绿色的前提下，提供媲美现代现代书刊的排版品质与毫秒级无感热同步体验。
 
 ## ✨ 核心特性
 
