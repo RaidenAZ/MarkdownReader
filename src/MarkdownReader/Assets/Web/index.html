@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-font="sans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https://media.folio.local; base-uri 'none'; form-action 'none'">
+  <title>Folio</title>
+  <link rel="stylesheet" href="./vendor/katex.css">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./renderer.js"></script>
+</head>
+<body>
+  <main id="reader">
+    <section id="welcome" aria-labelledby="welcome-title">
+      <div class="welcome-inner">
+        <div class="welcome-top">
+          <div class="folio-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+          <span>Living Manuscript on Mica</span>
+        </div>
+        <h1 id="welcome-title">Folio</h1>
+        <p class="welcome-lead">安静阅读本地 Markdown 文档，毫秒级无损同步外部编辑。</p>
+        <div class="import-area">
+          <div class="actions">
+            <button class="primary" data-action="openFile">打开文件</button>
+            <button data-action="openFolder">打开文件夹</button>
+            <button class="sample-action" data-action="example">阅读排版样张</button>
+          </div>
+          <span class="drop-hint">也可直接将 .md 文件或文件夹拖入窗口任意位置</span>
+        </div>
+        <section id="recent-section" hidden>
+          <div class="recent-header">
+            <h2>最近查阅</h2>
+            <button type="button" class="recent-clear" data-action="clearRecent" title="清空最近查阅记录">清空</button>
+          </div>
+          <ul id="recent-list"></ul>
+        </section>
+      </div>
+    </section>
+    <section id="manuscript" aria-label="阅读区" hidden>
+      <div id="page">
+        <div class="resize-rail left" data-resize="-1" title="左右拖拽调节正文阅读宽度（双击恢复舒适宽度）"></div>
+        <div class="resize-rail right" data-resize="1" title="左右拖拽调节正文阅读宽度（双击恢复舒适宽度）"></div>
+        <div id="metadata" class="doc-meta"></div>
+        <article id="article"></article>
+      </div>
+    </section>
+    <div id="outline-shell" hidden>
+      <button id="outline-pill" class="floating-pill" hidden aria-label="展开大纲" title="展开本文大纲">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M2.5 4h11M5.5 8h8M2.5 12h11"/>
+        </svg>
+        <span>大纲</span>
+      </button>
+      <aside id="outline-card" aria-labelledby="outline-title">
+        <header class="outline-header">
+          <span id="outline-title">大纲</span>
+          <button id="outline-collapse" class="icon small" aria-label="收起大纲" title="收起大纲">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 3.5L10.5 8 6 12.5"/>
+            </svg>
+          </button>
+        </header>
+        <nav id="outline-items"></nav>
+      </aside>
+    </div>
+  </main>
+  <div id="width-toast" hidden></div>
+  <dialog id="find-panel" aria-label="页内查找">
+    <div class="find-row">
+      <input id="query" type="search" placeholder="在本文中查找" aria-label="在本文中查找">
+      <output id="find-count" aria-live="polite"></output>
+      <button class="icon" id="find-previous" title="上一个匹配" aria-label="上一个匹配">↑</button>
+      <button class="icon" id="find-next" title="下一个匹配" aria-label="下一个匹配">↓</button>
+      <button class="icon" data-close title="关闭" aria-label="关闭">×</button>
+    </div>
+  </dialog>
+  <dialog id="typography-panel" class="settings-panel" aria-labelledby="typography-title">
+    <header><strong id="typography-title">排版</strong><button class="icon" data-close aria-label="关闭" title="关闭">×</button></header>
+    <fieldset>
+      <legend>字形</legend>
+      <div class="segments">
+        <button data-setting="font" data-value="sans">无衬线</button>
+        <button data-setting="font" data-value="serif">衬线</button>
+      </div>
+    </fieldset>
+    <div class="font-size-row">
+      <label for="font-size">字号</label>
+      <input id="font-size" type="range" min="13" max="26">
+      <output id="font-size-value" for="font-size"></output>
+    </div>
+    <fieldset>
+      <legend>阅读视幅 <small class="legend-hint">也可拖拽正文边缘</small></legend>
+      <div class="segments" id="width-presets">
+        <button data-width="760">标准</button>
+        <button data-width="980">舒展</button>
+        <button data-width="0">自适应满宽</button>
+      </div>
+    </fieldset>
+    <div class="switch-row">
+      <div class="switch-copy">
+        <span>点击旧文档时自动置顶</span>
+        <small>默认保持「最近查阅」原有顺序</small>
+      </div>
+      <button type="button" id="promote-recent-switch" class="toggle-switch" role="switch" aria-checked="false" aria-label="点击旧文档时自动置顶">
+        <i></i>
+      </button>
+    </div>
+  </dialog>
+  <dialog id="theme-panel" class="settings-panel" aria-labelledby="theme-title">
+    <header><strong id="theme-title">主题</strong><button class="icon" data-close aria-label="关闭" title="关闭">×</button></header>
+    <div class="segments theme-segments">
+      <button data-setting="theme" data-value="system">跟随系统</button>
+      <button data-setting="theme" data-value="light">浅色</button>
+      <button data-setting="theme" data-value="dark">深色</button>
+    </div>
+  </dialog>
+  <output id="notice" hidden role="status"></output>
+</body>
+</html>

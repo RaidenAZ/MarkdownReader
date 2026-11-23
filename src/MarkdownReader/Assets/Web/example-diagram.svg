@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="116" viewBox="0 0 480 116">
+  <rect width="480" height="116" rx="5" fill="#eef2f7"/>
+  <path d="M66 45h348m-7-5 7 5-7 5" stroke="#8494ac" fill="none"/>
+  <g fill="#2459ba">
+    <circle cx="66" cy="45" r="4"/>
+    <circle cx="240" cy="45" r="4"/>
+    <circle cx="380" cy="45" r="4"/>
+  </g>
+  <g text-anchor="middle" fill="#181a1f" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="15">
+    <text x="66" y="77">原稿</text>
+    <text x="240" y="77">修订</text>
+    <text x="380" y="77">校对</text>
+  </g>
+</svg>

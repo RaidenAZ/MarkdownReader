@@ -1,0 +1,33 @@
+# .NET build & publish outputs
+[Bb]in/
+[Oo]bj/
+publish/
+out/
+
+# Local portable SDK, NuGet cache & runtime state
+.dotnet/
+.nuget/
+NuGet.Config
+data/
+**/data/state.json
+**/data/webview2/
+
+# Visual Studio / Rider / VS Code user files
+.vs/
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Temporary & OS artifacts
+*.tmp
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store
