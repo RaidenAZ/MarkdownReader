@@ -389,22 +389,22 @@ code { font-family: var(--mono); font-size: .86em; }
 .code-tool.is-copied { color: var(--jade); }
 .code-block pre {
   margin: 0;
-  padding: 14px 16px;
+  padding: 18px 20px;
   overflow: auto;
   tab-size: 4;
   font-size: .82em;
-  line-height: 1.45;
+  line-height: 1.66;
   white-space: pre;
 }
 .code-block pre code { display: block; min-width: max-content; font-size: 1em; }
 .code-line { white-space: pre; }
-.code-block.is-diff pre { padding: 12px 0; line-height: 0; }
-.code-block.is-diff .code-line { display: block; min-height: 1.45em; line-height: 1.45; padding-inline: 16px; }
+.code-block.is-diff pre { padding: 15px 0; line-height: 0; }
+.code-block.is-diff .code-line { display: block; min-height: 1.66em; line-height: 1.66; padding-inline: 20px; }
 .code-block.is-wrapped pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .code-block.is-wrapped pre code { min-width: 0; }
 .code-block.is-wrapped .code-line { white-space: pre-wrap; overflow-wrap: anywhere; }
 .code-block.is-collapsed pre {
-  max-height: 360px;
+  max-height: 400px;
   overflow: hidden;
   mask-image: linear-gradient(180deg, #000 74%, transparent 100%);
 }
