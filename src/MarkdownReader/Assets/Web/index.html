@@ -77,11 +77,20 @@
   <dialog id="typography-panel" class="settings-panel" aria-labelledby="typography-title">
     <header><strong id="typography-title">排版</strong><button class="icon" data-close aria-label="关闭" title="关闭">×</button></header>
     <fieldset>
-      <legend>字形</legend>
+      <legend>正文字形</legend>
       <div class="segments">
         <button data-setting="font" data-value="sans">无衬线</button>
         <button data-setting="font" data-value="serif">衬线</button>
       </div>
+      <select id="body-font" class="font-select" aria-label="自定义正文字体">
+        <option value="">跟随上方字形预设（默认）</option>
+      </select>
+    </fieldset>
+    <fieldset>
+      <legend>代码字体 <small class="legend-hint">自动识别本机已装字体</small></legend>
+      <select id="code-font" class="font-select" aria-label="自定义代码字体">
+        <option value="">Cascadia Code（默认）</option>
+      </select>
     </fieldset>
     <div class="font-size-row">
       <label for="font-size">字号</label>

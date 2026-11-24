@@ -31,7 +31,7 @@ CSS.highlights.set("folio-current", currentMatch);
 let activeDocument;
 let blocks = [];
 let headings = [];
-let reading = { theme: "system", font: "sans", fontSize: 17, contentWidth: 820, outlineOpen: true, autoPromoteRecent: false };
+let reading = { theme: "system", font: "sans", fontSize: 17, contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, bodyFont: "", codeFont: "" };
 let findIndex = -1;
 let noticeTimer;
 let widthToastTimer;
@@ -557,8 +557,49 @@ function nextMatch(direction) {
   highlightMatch(true);
 }
 
+const codeFontPriority = /^(jetbrains mono|fira code|cascadia|consolas|maple mono|sarasa mono|lxgw wenkai mono|iosevka|source code pro|hack|menlo|monaco|ubuntu mono|ibm plex mono|inconsolata|victor mono|courier)/i;
+
+function populateFonts(fonts) {
+  const bodySelect = byId("body-font");
+  const codeSelect = byId("code-font");
+  const makeOption = font => {
+    const option = element("option", "", font.label);
+    option.value = font.css;
+    return option;
+  };
+  bodySelect.replaceChildren(makeOption({ css: "", label: "跟随上方字形预设（默认）" }), ...fonts.map(makeOption));
+  const preferred = fonts.filter(font => codeFontPriority.test(font.css) || /\b(mono|code|console)\b/i.test(font.css));
+  const others = fonts.filter(font => !preferred.includes(font));
+  const codeItems = [makeOption({ css: "", label: "Cascadia Code（默认）" })];
+  if (preferred.length) {
+    const group = element("optgroup");
+    group.label = "推荐编程 / 等宽字体";
+    group.append(...preferred.map(makeOption));
+    codeItems.push(group);
+  }
+  if (others.length) {
+    const group = element("optgroup");
+    group.label = "本机其他字体";
+    group.append(...others.map(makeOption));
+    codeItems.push(group);
+  }
+  codeSelect.replaceChildren(...codeItems);
+  syncFontSelect(bodySelect, reading.bodyFont);
+  syncFontSelect(codeSelect, reading.codeFont);
+}
+
+function syncFontSelect(select, value) {
+  const target = value || "";
+  if (target && ![...select.options].some(option => option.value === target)) {
+    const missing = element("option", "", `${target}（未安装）`);
+    missing.value = target;
+    select.append(missing);
+  }
+  select.value = target;
+}
+
 function applySettings(settings, dark) {
-  reading = { contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, ...settings };
+  reading = { contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, bodyFont: "", codeFont: "", ...settings };
   const root = document.documentElement;
   root.dataset.theme = dark ? "dark" : "light";
   root.dataset.font = reading.font;
@@ -566,10 +607,19 @@ function applySettings(settings, dark) {
   root.dataset.fullwidth = String(fullWidth);
   if (!fullWidth) root.style.setProperty("--content-width", `${reading.contentWidth}px`);
   root.style.setProperty("--reading-size", `${reading.fontSize}px`);
+  if (reading.bodyFont) root.style.setProperty("--reading-font", `"${reading.bodyFont}", ${reading.font === "serif" ? "var(--serif)" : "var(--sans)"}`);
+  else root.style.removeProperty("--reading-font");
+  if (reading.codeFont) root.style.setProperty("--mono", `"${reading.codeFont}", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace`);
+  else root.style.removeProperty("--mono");
   byId("font-size").value = reading.fontSize;
   byId("font-size-value").textContent = reading.fontSize;
+  syncFontSelect(byId("body-font"), reading.bodyFont);
+  syncFontSelect(byId("code-font"), reading.codeFont);
   for (const button of document.querySelectorAll("[data-setting]"))
-    button.setAttribute("aria-pressed", String(String(reading[button.dataset.setting]) === button.dataset.value));
+    button.setAttribute("aria-pressed", String(
+      button.dataset.setting === "font" && reading.bodyFont
+        ? false
+        : String(reading[button.dataset.setting]) === button.dataset.value));
   for (const button of document.querySelectorAll("[data-width]")) {
     const preset = Number(button.dataset.width);
     const active = preset === 0
@@ -601,10 +651,15 @@ function showWidthToast(label) {
   widthToastTimer = setTimeout(() => { widthToast.hidden = true; }, 1100);
 }
 
-function showPanel(name) {
+function showPanel(name, toggle = true) {
   if (name === "find" && !activeDocument) return;
   const panel = panels[name];
+  const wasOpen = panel.open;
   for (const other of Object.values(panels)) if (other !== panel) other.close();
+  if (wasOpen && toggle) {
+    panel.close();
+    return;
+  }
   if (!panel.open) panel.show();
   if (panel === panels.find) {
     query.focus();
@@ -627,12 +682,16 @@ function setOutlineOpen(open) {
 }
 
 document.addEventListener("click", event => {
+  for (const panel of [panels.typography, panels.theme]) {
+    if (panel.open && !panel.contains(event.target)) panel.close();
+  }
   const button = event.target.closest("button");
   if (button?.dataset.action) send(button.dataset.action, { path: button.dataset.path });
   if (button?.hasAttribute("data-close")) button.closest("dialog").close();
   if (button?.dataset.setting) {
     const { setting, value } = button.dataset;
-    reading = { ...reading, [setting]: value };
+    reading = setting === "font" ? { ...reading, font: value, bodyFont: "" } : { ...reading, [setting]: value };
+    applySettings(reading, document.documentElement.dataset.theme === "dark");
     send("settings", { reading });
   }
   if (button?.dataset.width !== undefined) {
@@ -660,7 +719,7 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape") for (const panel of Object.values(panels)) panel.close();
   if (!event.ctrlKey || event.altKey || event.metaKey) return;
   const key = event.key.toLowerCase();
-  if (key === "f") showPanel("find");
+  if (key === "f") showPanel("find", false);
   else if (key === "o") send("openFile");
   else if (key === "home") send("home");
   else if (key === "b") send("toggleSidebar");
@@ -673,6 +732,13 @@ byId("font-size").addEventListener("input", event => {
   applySettings(reading, document.documentElement.dataset.theme === "dark");
 });
 byId("font-size").addEventListener("change", () => send("settings", { reading }));
+for (const [id, key] of [["body-font", "bodyFont"], ["code-font", "codeFont"]]) {
+  byId(id).addEventListener("change", event => {
+    reading = { ...reading, [key]: event.target.value };
+    applySettings(reading, document.documentElement.dataset.theme === "dark");
+    send("settings", { reading });
+  });
+}
 byId("outline-collapse").addEventListener("click", () => setOutlineOpen(false));
 outlinePill.addEventListener("click", () => setOutlineOpen(true));
 byId("promote-recent-switch").addEventListener("click", () => {
@@ -733,6 +799,7 @@ panels.find.addEventListener("close", () => {
 bridge.addEventListener("message", event => {
   const message = event.data;
   switch (message.type) {
+    case "fonts": populateFonts(message.fonts); break;
     case "settings": applySettings(message.reading, message.dark); break;
     case "panel": showPanel(message.panel); break;
     case "error": showNotice(message.message); break;

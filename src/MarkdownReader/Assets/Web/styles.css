@@ -585,7 +585,12 @@ dialog {
   border-radius: 7px;
 }
 #find-count { min-width: 48px; text-align: center; font-size: 12px; color: var(--muted); }
-.settings-panel { width: min(286px, calc(100vw - 28px)); padding: 11px 14px 15px; }
+.settings-panel {
+  width: min(296px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  padding: 11px 14px 15px;
+}
 .settings-panel header { display: flex; justify-content: space-between; align-items: center; }
 .settings-panel fieldset { border: 0; margin: 11px 0 0; padding: 0; }
 .settings-panel legend {
@@ -623,6 +628,25 @@ dialog {
   box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
 }
 .theme-segments { margin-top: 10px; }
+.font-select {
+  width: 100%;
+  height: 30px;
+  padding: 0 26px 0 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background-color: var(--well);
+  color: var(--ink);
+  font: 12.5px/1 var(--sans);
+  outline: none;
+  cursor: pointer;
+}
+#body-font { margin-top: 6px; }
+.font-select:hover { border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
+.font-select:focus-visible { border-color: var(--accent); }
+.font-select option, .font-select optgroup {
+  background: var(--panel-solid);
+  color: var(--ink);
+}
 .font-size-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 28px; gap: 8px; align-items: center; margin-block: 12px 4px; }
 .font-size-row label { color: var(--muted); font-size: 12px; }
 .font-size-row input { accent-color: var(--accent); }
