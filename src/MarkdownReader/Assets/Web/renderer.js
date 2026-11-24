@@ -106,6 +106,36 @@ const aliases = new Map(Object.entries({
   tf: "hcl", kt: "kotlin", jl: "julia", makefile: "make", pl: "perl", protobuf: "proto",
   rest: "rst", sv: "system-verilog", systemverilog: "system-verilog", vbnet: "vb"
 }));
+const languageLabels = new Map(Object.entries({
+  asciidoc: "AsciiDoc", bat: "Batch", bibtex: "BibTeX", c: "C", clojure: "Clojure", cmake: "CMake",
+  cpp: "C++", csharp: "C#", css: "CSS", csv: "CSV", dart: "Dart", diff: "Diff", dotenv: "Dotenv",
+  elixir: "Elixir", erlang: "Erlang", fish: "Fish", fsharp: "F#", go: "Go", graphql: "GraphQL",
+  groovy: "Groovy", haskell: "Haskell", hcl: "HCL", html: "HTML", http: "HTTP", ini: "INI",
+  java: "Java", javascript: "JavaScript", json: "JSON", julia: "Julia", kotlin: "Kotlin", latex: "LaTeX",
+  less: "Less", log: "Log", lua: "Lua", make: "Makefile", markdown: "Markdown", mdx: "MDX", nix: "Nix",
+  perl: "Perl", php: "PHP", powershell: "PowerShell", proto: "Protobuf", python: "Python", r: "R",
+  rst: "reST", ruby: "Ruby", rust: "Rust", scala: "Scala", scss: "SCSS", shellscript: "Shell",
+  sql: "SQL", svelte: "Svelte", swift: "Swift", "system-verilog": "SystemVerilog", toml: "TOML",
+  typescript: "TypeScript", vb: "VB", verilog: "Verilog", vue: "Vue", xml: "XML", yaml: "YAML"
+}));
+const iconSvg = paths => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "13.5");
+  svg.setAttribute("height", "13.5");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.4");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+};
 const embedded = new Map(Object.entries({ typescript, json, shellscript }));
 const grammarLoads = new Map();
 const highlighter = createHighlighterCore({
@@ -114,28 +144,81 @@ const highlighter = createHighlighterCore({
 
 function renderCode(block) {
   const frame = element("div", "code-block");
-  const header = element("div", "code-header");
-  const copy = element("button", "copy-code", "复制");
+  const toolbar = element("div", "code-toolbar");
+  const label = (block.lang || "").toLowerCase();
+  const language = aliases.get(label) ?? label;
+  const langName = languageLabels.get(language) ?? (block.lang ? block.lang : "Plain");
+  const lines = block.value.split("\n");
+  const foldable = lines.length > 26;
+
+  const langTag = element("span", "code-lang", langName);
+  const copy = element("button", "code-tool");
+  copy.type = "button";
+  copy.title = "复制代码";
+  copy.setAttribute("aria-label", "复制代码");
+  const setCopyIcon = copied => {
+    copy.classList.toggle("is-copied", copied);
+    copy.replaceChildren(iconSvg(copied
+      ? ["M3.2 8.5L6.5 11.8L12.8 4.6"]
+      : ["M5.8 5.8H12.2A1.3 1.3 0 0 1 13.5 7.1V12.2A1.3 1.3 0 0 1 12.2 13.5H5.8A1.3 1.3 0 0 1 4.5 12.2V7.1A1.3 1.3 0 0 1 5.8 5.8Z",
+         "M10.5 4.5V3.6A1.1 1.1 0 0 0 9.4 2.5H3.6A1.1 1.1 0 0 0 2.5 3.6V9.4A1.1 1.1 0 0 0 3.6 10.5H4.5"]));
+  };
+  setCopyIcon(false);
+
+  const wrapToggle = element("button", "code-tool");
+  wrapToggle.type = "button";
+  wrapToggle.title = "切换自动换行";
+  wrapToggle.setAttribute("aria-label", "切换自动换行");
+  wrapToggle.setAttribute("aria-pressed", "false");
+  wrapToggle.append(iconSvg(["M2.8 4.2H13.2", "M2.8 8H11A2.1 2.1 0 0 1 11 12.2H7.2", "M9 10.4L7.1 12.2L9 14", "M2.8 12.2H4.8"]));
+  wrapToggle.addEventListener("click", () => {
+    const wrapped = frame.classList.toggle("is-wrapped");
+    wrapToggle.setAttribute("aria-pressed", String(wrapped));
+  });
+
   const pre = element("pre");
   const code = element("code");
   code.textContent = block.value;
   copy.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(block.value);
-      copy.textContent = "已复制";
-      setTimeout(() => { copy.textContent = "复制"; }, 1300);
+      setCopyIcon(true);
+      setTimeout(() => setCopyIcon(false), 1400);
     } catch {
       showNotice("无法访问剪贴板");
     }
   });
-  header.append(element("span", "", block.lang || "纯文本"), copy);
+  toolbar.append(langTag, element("i", "code-tool-sep"), copy, wrapToggle);
   pre.append(code);
-  frame.append(header, pre);
+  frame.append(toolbar, pre);
 
-  const label = (block.lang || "").toLowerCase();
-  const language = aliases.get(label) ?? label;
+  if (foldable) {
+    frame.classList.add("is-collapsed");
+    const foldToggle = element("button", "code-tool");
+    foldToggle.type = "button";
+    const expandBar = element("button", "code-expand");
+    expandBar.type = "button";
+    const syncFold = collapsed => {
+      frame.classList.toggle("is-collapsed", collapsed);
+      foldToggle.title = collapsed ? `展开全部（共 ${lines.length} 行）` : "收起长代码";
+      foldToggle.setAttribute("aria-label", foldToggle.title);
+      foldToggle.setAttribute("aria-pressed", String(!collapsed));
+      foldToggle.replaceChildren(iconSvg(collapsed
+        ? ["M5 6.2L8 3.2L11 6.2", "M5 9.8L8 12.8L11 9.8"]
+        : ["M5 3.8L8 6.8L11 3.8", "M5 12.2L8 9.2L11 12.2"]));
+      expandBar.textContent = collapsed ? `展开全部代码（共 ${lines.length} 行）` : "收起代码";
+    };
+    syncFold(true);
+    const toggleFold = () => syncFold(!frame.classList.contains("is-collapsed"));
+    foldToggle.addEventListener("click", toggleFold);
+    expandBar.addEventListener("click", toggleFold);
+    toolbar.append(foldToggle);
+    frame.append(expandBar);
+  }
+
   if (language === "diff") {
-    code.replaceChildren(...block.value.split("\n").flatMap((line, index) => [...(index ? ["\n"] : []), element("span",
+    frame.classList.add("is-diff");
+    code.replaceChildren(...lines.flatMap((line, index) => [...(index ? ["\n"] : []), element("span",
       `code-line ${/^(?:\+\+\+|---|@@|diff |index )/.test(line) ? "diff-context" :
         line.startsWith("+") ? "added" : line.startsWith("-") ? "removed" : ""}`, line)]));
     return frame;
@@ -430,7 +513,7 @@ function findInPage(jump = false) {
     for (const block of article.children) {
       const parts = [];
       const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-        acceptNode: node => node.parentElement.closest(".code-header, .katex-mathml, [aria-hidden]:not(.katex-html, .katex-html *)")
+        acceptNode: node => node.parentElement.closest(".code-toolbar, .code-expand, .katex-mathml, [aria-hidden]:not(.katex-html, .katex-html *)")
           ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
       });
       while (walker.nextNode()) parts.push(walker.currentNode);
@@ -460,6 +543,7 @@ function highlightMatch(jump) {
   if (!selected) return;
   currentMatch.add(selected);
   if (jump) {
+    selected.startContainer.parentElement?.closest(".code-block.is-collapsed")?.querySelector(".code-expand")?.click();
     const match = selected.getBoundingClientRect();
     const view = manuscript.getBoundingClientRect();
     if (match.top < view.top + 16 || match.bottom > view.bottom - 16)
