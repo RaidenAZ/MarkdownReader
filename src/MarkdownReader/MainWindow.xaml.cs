@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Markup;
 using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
@@ -156,6 +157,7 @@ public partial class MainWindow : FluentWindow
         {
             case "ready":
                 canvasReady = true;
+                SendFonts();
                 SendSettings();
                 UpdateRecent();
                 if (document is { } current)
@@ -213,6 +215,27 @@ public partial class MainWindow : FluentWindow
                 }
                 break;
         }
+    }
+
+    private void SendFonts()
+    {
+        var en = XmlLanguage.GetLanguage("en-us");
+        var zh = XmlLanguage.GetLanguage("zh-cn");
+        var fonts = Fonts.SystemFontFamilies
+            .Select(family =>
+            {
+                var css = family.FamilyNames.TryGetValue(en, out var english) ? english : family.Source;
+                var label = family.FamilyNames.TryGetValue(zh, out var chinese) && chinese != css ? $"{chinese} ({css})" : css;
+                return new { css, label };
+            })
+            .Where(font => !font.css.StartsWith("Global ", StringComparison.OrdinalIgnoreCase) &&
+                !font.css.Contains("Icons", StringComparison.OrdinalIgnoreCase) &&
+                !font.css.Contains("MDL2", StringComparison.OrdinalIgnoreCase) &&
+                font.css is not ("Marlett" or "Symbol" or "Webdings" or "Wingdings" or "Wingdings 2" or "Wingdings 3"))
+            .DistinctBy(font => font.css, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(font => font.label, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+        Send(new { type = "fonts", fonts });
     }
 
     private void ServeImage(object? sender, CoreWebView2WebResourceRequestedEventArgs args)

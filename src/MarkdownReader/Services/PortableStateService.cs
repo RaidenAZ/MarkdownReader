@@ -51,13 +51,20 @@ public sealed record ReadingSettings(
     int FontSize = 17,
     int ContentWidth = 820,
     bool OutlineOpen = true,
-    bool AutoPromoteRecent = false)
+    bool AutoPromoteRecent = false,
+    string BodyFont = "",
+    string CodeFont = "")
 {
     public ReadingSettings Normalize() => this with
     {
         Theme = Theme is "light" or "dark" ? Theme : "system",
         Font = Font == "serif" ? Font : "sans",
         FontSize = Math.Clamp(FontSize, 13, 26),
-        ContentWidth = ContentWidth == 0 ? 0 : Math.Clamp(ContentWidth, 620, 1800)
+        ContentWidth = ContentWidth == 0 ? 0 : Math.Clamp(ContentWidth, 620, 1800),
+        BodyFont = CleanFontName(BodyFont),
+        CodeFont = CleanFontName(CodeFont)
     };
+
+    private static string CleanFontName(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "" : new string(value.Trim().Where(ch => ch is not ('"' or '\'' or ';' or '{' or '}' or '\r' or '\n')).Take(80).ToArray());
 }
