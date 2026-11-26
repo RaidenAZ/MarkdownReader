@@ -1,128 +1,182 @@
-# Folio · Markdown 阅读器架构设计与实施进度
+# Folio · 架构设计、实现现状与演进规划
 
-> **项目定位**：面向 Windows 11 的免安装绿色 Markdown 阅读器与 AI Agent 实时共创手稿台（Living Manuscript on Mica）。  
-> **核心原则**：零安装、绝不篡改系统 `.md` 默认文件关联、便携式记录历史状态、出版级排版质感、毫秒级无损响应外部 Agent 编辑。
-
----
-
-## 1. 背景与核心诉求
-
-日常查阅本地大量 Markdown 文档，以及配合 AI Coding Agent 实时编写/修改文档时，现有工具存在明显短板：
-- **系统自带记事本**：渲染样式简陋，缺乏公式、语法高亮、提示块等现代排版能力，长文阅读体验差。
-- **重型桌面客户端（Typora / Obsidian 等）**：普遍需要安装，容易写入注册表或劫持系统默认 `.md` 打开方式，体量偏重。
-
-因此，本项目确立以下**核心交付标准**：
-1. **免安装绿色文件夹形态**：直接解压或放在任意目录即可双击运行，**零注册表写入、不修改系统文件关联**；同时利用同级便携目录（`data/state.json`）持久化保存最近打开的文档、文件夹工作区及个人阅读偏好。
-2. **多途径便捷导入**：支持「打开单文件」、「打开文件夹（生成侧边文档树）」、「窗口拖拽直接导入」、「命令行参数启动」以及初始欢迎页的「最近查阅列表」一键续读。
-3. **AI Agent 实时联动（Live Reload）**：当外部 Agent 编辑并保存 `.md` 文件时，自动捕获文件变更（兼容临时文件原子替换写入），在**锁定当前阅读滚动位置不跳动**的前提下完成差量更新，并在新修改的段落侧边提供克制的视觉呼吸提示。
-4. **高质量全特性渲染**：原生级离线支持 **LaTeX 数学公式（KaTeX）**、**多语言代码块语法高亮与 Diff 视图（Shiki）**、**GFM Notice / Callout 提示块**、优雅引用块、表格、任务列表以及本地相对路径图片。
+> **当前版本**：`v1.1.0`（已落地可发布绿色便携版）  
+> **项目定位**：面向 Windows 11 的免安装绿色 Markdown / LaTeX 阅读器与 AI Agent 实时共创手稿台（Living Manuscript on Mica）。  
+> **核心约束**：零安装、零注册表写入、绝不劫持系统 `.md` / `.tex` 文件关联、100% 离线渲染、所有状态与缓存收敛在程序同级 `./data/` 目录。
 
 ---
 
-## 2. 技术架构方案
+## 1. 产品原则与硬性约束
 
-结合本机环境（Windows 11 Build 26300 + `.NET 10 SDK 10.0.115` + 系统内置 `Edge WebView2 Runtime`），采用 **C# (.NET 10) + WPF-UI + 透明 WebView2 混合双层架构**：
+在后续所有迭代中，以下原则视为不可破坏的架构边界：
+
+1. **纯粹绿色便携**：运行态数据严格收敛在程序同级的 `./data/state.json` 与 `./data/webview2/`；禁止写注册表或修改系统文件关联。
+2. **100% 离线零构建链依赖**：`src/MarkdownReader/Assets/Web/vendor/` 内置全部解析器、数学字体与 59 语言高亮模块，克隆仓库后无需 Node.js / `npm install` 即可直接 `dotnet build / publish`。
+3. **零第三方字体打包负担**：正文字体与代码字体通过 C# 原生枚举用户本机已安装字体（`Fonts.SystemFontFamilies`），不在仓库中分发第三方 `.ttf/.woff2` 字体文件，彻底规避 OFL 等字体分发合规风险。
+4. **面向 AI Agent 协作的稳定性**：外部编辑采用防抖 + 抗文件锁重试读取 + 顶层块级 DOM 差量更新，严守**阅读滚动锚点零跳动**。
+
+---
+
+## 2. 当前系统架构总览
+
+项目采用 **C# (.NET 10 / WPF-UI 4.3) 原生宿主 + 透明 `WebView2CompositionControl` 排版核** 的双层混合架构，前后端通过 `PostWebMessageAsJson` 内存双向通信，安全边界由离线 CSP 与受控虚拟主机严格隔离。
 
 ```text
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Native Host Layer: C# (.NET 10) + WPF-UI 4.3 + CommunityToolkit.Mvvm     │
-│  - 原生 Win11 DWM Mica / Mica Alt 云母透光窗口与沉浸式无边框标题栏          │
-│  - 便携状态管理 (PortableStateService -> ./data/state.json & ./data/wv2)  │
-│  - 防抖动 + 原子写兼容监听 (LiveFileWatcher: LastWrite | FileName | Size)  │
-│  - WebView2 虚拟主机映射 (https://folio.local/ 零跨域加载离线引擎与本地图)  │
-└─────────────────────────────────────┬─────────────────────────────────────┘
-                                      │ PostWebMessageAsJson (双向内存通道)
-┌─────────────────────────────────────▼─────────────────────────────────────┐
-│  Editorial Canvas Layer: Transparent WebView2 (DefaultBackgroundColor=0)  │
-│  - AST 解析核: micromark + mdast-util-from-markdown (GFM + Math + CJK)    │
-│  - 数学公式核: KaTeX 离线引擎 + 22 款本地 WOFF2 数学字体                   │
-│  - 代码高亮核: Shiki Core (JS Engine) + 59 种编程语言离线语法包 + Diff 渲染 │
-│  - 提示与结构: GitHub Alerts (> [!NOTE] 等) / 引用块 / 右侧滚动跟随大纲    │
-│  - 差量热更新: 块级 DOM 比对更新 + 滚动锚点保持 + Agent 修改段落侧边微光   │
-└───────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Native Host Layer: C# (.NET 10, net10.0-windows10.0.17763.0) + WPF-UI 4.3   │
+│                                                                             │
+│  MainWindow.xaml / .cs (FluentWindow)                                       │
+│   ├─ 原生 Win11 Mica(浅) / Tabbed(深) 外壳 + 40px 沉浸标题栏 + 多尺寸 app.ico │
+│   ├─ 左侧可折叠导航栏 (228px): 工作区目录树 + 最近查阅(单删/清空/右键/动态色)  │
+│   ├─ 内嵌圆角阅读画布容器 (SheetContainer, 10px 圆角半透明纸面)               │
+│   ├─ 虚拟主机 https://folio.local -> Assets/Web (Deny 跨域)                  │
+│   ├─ 受控图片流代理 https://media.folio.local/image?<relPath>                │
+│   └─ 本机字体枚举 SendFonts() -> 中英双语标签 + 图标字体过滤                  │
+│                                                                             │
+│  Services/                                                                  │
+│   ├─ PortableStateService.cs  -> ./data/state.json 原子写(.tmp->Move)与归一化 │
+│   ├─ LiveFileWatcherService.cs-> 120ms 防抖 + IOException 60ms×5 重试读取    │
+│   └─ WorkspaceTreeService.cs  -> 递归扫描 .md/.markdown/.tex（跳过隐藏/链接） │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │ PostWebMessageAsJson (Web JSON)
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│ Editorial Canvas Layer: Transparent WebView2 (Assets/Web/)                  │
+│                                                                             │
+│  index.html + styles.css + renderer.js + latex.js (原生 ES Module)          │
+│   ├─ AST 解析: micromark + mdast-util-from-markdown (GFM/Math/CJK/\[...\]扩展)│
+│   ├─ LaTeX 流式解析: latex.js -> MDAST（复用 KaTeX/Shiki/大纲/热同步/宏展开） │
+│   ├─ 数学引擎: KaTeX 离线引擎 + 22 款本地 WOFF2 字体                         │
+│   ├─ 代码块引擎: Shiki Core (JS Regex, CSS Variables 主题) + 59 语言懒加载   │
+│   │   └─ Notion 风格悬浮胶囊工具栏(复制/自动换行/长代码>26行自动折叠) + Diff │
+│   ├─ 图表引擎: Mermaid 12.3 离线懒加载(mermaid.min.js) + 双模主题 + 容错回退 │
+│   ├─ 缩放灯箱: 通用毛玻璃灯箱(#lightbox)，支持 Mermaid 与正文图片滚轮缩放拖拽│
+│   ├─ 差量热同步: 顶层块签名首尾匹配 + 视口锚点补偿 + 3.6s 青玉侧边微光        │
+│   ├─ 阅读辅助: 悬浮毛玻璃圆角大纲(H1-H4, 可折胶囊) / 左右隐形边缘拖拽调宽     │
+│   └─ 交互浮层: CSS Highlight 查找 / Aa 排版(字体+进度记忆开关) / 主题面板    │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 关键工程决策说明
-- **为什么选择 WPF-UI 4.3 而非 WinUI 3**：WPF-UI 在 `.NET 10` 下可直接输出纯净的绿色文件夹版本，无需安装 MSIX 包或额外的 Windows App Runtime，彻底杜绝抢占默认打开方式的问题，同时完整调用 Win11 原生 `Mica` 材质。
-- **100% 离线零 CDN 依赖**：所有前端排版引擎（解析器、KaTeX、Shiki 59 语言包、数学字体）均内置于程序目录 `Assets/Web/vendor` 中，断网或内网受限环境下依然秒开渲染。
-- **本地相对路径图片无缝解析**：阅读某个 `.md` 文档时，C# 宿主动态将该文档所在目录映射至虚拟主机路径（或拦截本地图片资源流），使得 `./images/diagram.png` 或 Windows 相对路径图片无需任何浏览器权限弹窗即可直接显示。
+### 2.1 目录与模块职责清单
+
+| 路径 | 职责说明 |
+| :--- | :--- |
+| `MarkdownReader.sln` | 解决方案入口 |
+| `src/MarkdownReader/MarkdownReader.csproj` | `.NET 10` WPF 工程配置（`v1.1.0`、内嵌 `app.ico`、`Assets/Web` 同步复制到输出/发布目录） |
+| `src/MarkdownReader/App.xaml(.cs)` | WPF-UI 主题字典加载与命令行启动参数解析（支持传入单文件或文件夹路径） |
+| `src/MarkdownReader/MainWindow.xaml(.cs)` | 窗口布局、侧栏交互、WebView2 宿主安全策略、消息分发、文件/工作区监听调度 |
+| `src/MarkdownReader/Services/PortableStateService.cs` | 便携状态模型（含 `ReadingProgress` 进度字典与 `ReadingSettings`）与原子持久化 |
+| `src/MarkdownReader/Services/LiveFileWatcherService.cs` | 文件/目录变更监听、120ms `DispatcherTimer` 防抖与抗锁重试读取 |
+| `src/MarkdownReader/Services/WorkspaceTreeService.cs` | 文件夹内文档树构建（仅保留含 `.md`/`.markdown`/`.tex` 的非空目录） |
+| `src/MarkdownReader/Assets/app.ico` / `app-icon.png` | 多尺寸应用图标（16–256px）及展示图 |
+| `src/MarkdownReader/Assets/Web/index.html` | 严格 CSP、欢迎页、阅读纸面、悬浮大纲、三类 `<dialog>` 浮层与通用缩放灯箱 |
+| `src/MarkdownReader/Assets/Web/styles.css` | 浅/深双模 CSS Token、排版细节、Notion 代码块、Mermaid 卡片与灯箱样式 |
+| `src/MarkdownReader/Assets/Web/renderer.js` | Markdown/LaTeX 统一渲染管线、Mermaid 懒加载与灯箱、阅读进度记忆、块级热同步与大纲/查找 |
+| `src/MarkdownReader/Assets/Web/latex.js` | 离线 LaTeX → MDAST 流式解析器（章节、公式环境、学术定理框、表格、代码、宏展开与优雅降级） |
+| `src/MarkdownReader/Assets/Web/example.md` | 内置全特性排版样张（含公式、代码、Diff、提示块、表格、本地插图与 Mermaid 图表） |
+| `src/MarkdownReader/Assets/Web/vendor/` | 预构建离线 `vendor.js`、`mermaid.min.js`（v12.3.0 MIT）、`katex.css`、22 数学字体与 59 种 Shiki 语言模块 |
 
 ---
 
-## 3. 视觉与排版设计规范（遵循 `frontend-design`）
+## 3. 前后端通信协议与数据契约
 
-### 3.1 设计母题：「云母之上的活页手稿台（Living Manuscript on Mica）」
-摒弃千篇一律的“灰底套白卡片阴影（SaaS Card 套路）”与浮夸渐变，让 WebView2 画布背景保持透明，直接呼吸在原生 Windows 11 Mica 云母材质之上；仅用克制的 `1px` 细线（Hairline Rule）与精准的字号比例建立秩序，**让正文排版成为唯一主角**。
+后续新增功能若涉及 C# 与 WebView2 交互，请沿用以下统一 JSON 契约（`JsonSerializerDefaults.Web`，小驼峰命名）：
 
-### 3.2 核心色彩 Token（双模云母调色板）
+### 3.1 Host -> Web 消息（`type` 字段）
+| `type` | 载荷关键字段 | 用途 |
+| :--- | :--- | :--- |
+| `fonts` | `fonts: [{ css, label }]` | 首次 `ready` 时下发本机可用字体列表 |
+| `settings` | `reading: ReadingSettings, dark: bool` | 同步主题状态、排版参数、字体与大纲开关 |
+| `recent` | `recent: [{ path, isActive, name, displayName }]` | 同步欢迎页「最近查阅」列表 |
+| `document` | `document: { path, name, text, updated, isExample, format }, live: bool, progress?: number` | 首次打开（`live=false`，按需携带上次阅读进度比例 `0–1`）或 Agent 热更新（`live=true`）；`format` 为 `"markdown"` 或 `"latex"` |
+| `home` | 无 | 切回初始欢迎页并清空当前文档状态 |
+| `panel` | `panel: "find" \| "typography" \| "theme"` | 切换对应顶部浮层（重复点击自动 Toggle 关闭） |
+| `error` | `message: string` | 底部毛玻璃 Toast 提示错误 |
 
-| Token 名称 | 浅色模式 (Daylight Mica) | 深色模式 (Obsidian Mica Alt) | 用途说明 |
-| :--- | :--- | :--- | :--- |
-| `Canvas Surface` | 原生 Mica + `#F7F8FA` (65% 罩染) | 原生 Mica Alt + `#14161A` | 主阅读区通透基底，透出桌面漫反射质感 |
-| `Graphite Ink` | `#181A1F` | `#E6E8EC` | 正文主墨色，高对比度且避免纯黑/纯白刺眼 |
-| `Slate Muted` | `#5E6673` | `#949BA6` | 次级元数据、未激活大纲项、代码块行号与引文旁注 |
-| `Hairline Rule` | `#DDE2EA` | `#282C34` | 1px 结构分割线与表格细框，不加虚浮阴影 |
-| `Cobalt Accent` | `#2563EB` | `#60A5FA` | 链接、激活态大纲游标与键盘焦点环 |
-| `Live Jade` | `#0D9488` | `#2DD4BF` | **唯一动态焦点**：Agent 实时监听圆点及新修改段落左侧 2px 呼吸提示线 |
+### 3.2 Web -> Host 消息（`action` 字段）
+| `action` | 载荷关键字段 | 用途 |
+| :--- | :--- | :--- |
+| `ready` | 无 | Web 初始化就绪，触发 Host 下发字体、设置、最近列表与待渲染文档 |
+| `openFile` / `openFolder` / `example` / `home` / `toggleSidebar` | 无 | 触发原生文件/目录选择器、打开样张、回首页或折叠侧栏 |
+| `openRecent` / `removeRecent` / `clearRecent` | `path?` | 打开、单条移除或清空最近查阅记录 |
+| `settings` | `reading: ReadingSettings` | 持久化阅读设置（Host 端执行 `Normalize()` 校验后写盘） |
+| `progress` | `path: string, ratio: number` | 滚动节流（500ms）或切页/退出时上报阅读进度比例（仅 `rememberProgress=true` 且非样张生效） |
+| `externalLink` | `url` | 仅允许 `http` / `https` / `mailto` 由系统默认浏览器安全打开 |
 
-### 3.3 字体排印与阅读体验（Typography & Callouts）
-- **字体组合**：
-  - **现代无衬线模式（默认）**：`Segoe UI Variable`（利用 Display / Text 光学字重）搭配中文 `Microsoft YaHei UI` / `HarmonyOS Sans SC`。
-  - **书刊衬线模式（一键切换）**：Windows 原生屏幕阅读衬线体 `Sitka Text` 搭配中文衬线排印，行高提升至 `1.78`，适合深度长文阅读。
-  - **等宽代码字体**：`Cascadia Code` / `Consolas`，字号 `0.88em`，配语言标识与一键复制反馈。
-- **行宽与对齐**：正文严格左对齐（Left-aligned），标准模式锁定 **`68ch`（约 720px）** 黄金阅读视幅，并提供「宽屏模式」以便查阅宽幅数据表格与代码对比。
-- **Notice / Callout 专项设计**：支持 `> [!NOTE]`、`> [!TIP]`、`> [!IMPORTANT]`、`> [!WARNING]`、`> [!CAUTION]` 五类语义化提示块。采用左侧语义色细边线 + 极低饱和度同色系半透明底衬 + 简洁线性图标标题，清晰醒目而不破坏阅读心流。
-
-### 3.4 空间布局结构
-
-```text
-+----------------------------------------------------------------------------------+
-| [图标] Folio    design-spec.md  [● 实时监听中]        [查找] [Aa] [主题] [_][□][X] | <- 38px 沉浸式 Mica 标题栏
-+--------------------+---------------------------------------------+---------------+
-| 工作区 / 最近打开   |                                             | 本文大纲      |
-|                    |  # 一级标题作为开篇锚点                      |               |
-| ▾ 当前文件夹       |  更新于刚刚 · 约 5 分钟阅读                  | 核心背景      |
-|   README.md        |  ─────────────────────────────────────────  | 技术架构方案 ◄| <- 1px 钴蓝游标跟随
-| ● design-spec.md   |                                             |   关键决策    |
-|   notes/           |  正文直接呈现在通透云母层上，保持 68ch 舒适  | 视觉设计规范  |
-|                    |  视幅，支持行内公式 $E=mc^2$ 与独立公式块。  | 实施进度清单  |
-| ▾ 最近查阅         |                                             |               |
-|   api-guide.md     |  ┃ [Agent 刚修改的段落] 左侧浮现 2px 青玉色  |               |
-|                    |  ┃ 微光边线，数秒后安静隐去，滚动位置零跳动  |               |
-| [+ 文件] [+ 文件夹]|                                             |               |
-+--------------------+---------------------------------------------+---------------+
-  可折叠侧栏 (240px)     主阅读画布（无卡片外框，支持初始欢迎台）     悬浮大纲 (200px)
+### 3.3 持久化状态结构（`./data/state.json`）
+```json
+{
+  "recent": ["最多 12 条本地 Markdown 绝对路径"],
+  "readingProgress": { "最多 50 篇本地文档绝对路径": 0.42 },
+  "workspace": "上次打开的工作区目录路径或 null",
+  "window": { "left": 0, "top": 0, "width": 1180, "height": 800, "maximized": false },
+  "reading": {
+    "theme": "system | light | dark",
+    "font": "sans | serif",
+    "fontSize": 17,
+    "contentWidth": 820,
+    "outlineOpen": true,
+    "autoPromoteRecent": false,
+    "rememberProgress": false,
+    "bodyFont": "",
+    "codeFont": ""
+  }
+}
 ```
+> `contentWidth` 有效范围为 `620–1800`（单位 `px`），`0` 表示自适应满宽。`bodyFont` / `codeFont` 经 `CleanFontName` 清洗，空字符串表示使用默认预设。`readingProgress` 按滚动比例存储（顶部 `< 40px` 自动清除），避免字号/视幅变化导致定位偏移。
+
+### 3.4 安全与沙箱边界
+- **严格 CSP**：`default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://media.folio.local; base-uri 'none'; form-action 'none'`（放行 `data:` 仅用于 Mermaid 生成的内联 SVG/图元，绝不开放任何外网域）。
+- **导航锁定**：`NavigationStarting` 拦截除 `https://folio.local/index.html` 外的一切跳转；`NewWindowRequested` 一律取消；外链经协议白名单校验后交由操作系统打开。
+- **本地图片代理**：`ServeImage` 仅接受当前打开文档的相对路径（拒绝绝对路径、`:`、`\0`）且扩展名在图片白名单内（`.png/.jpg/.jpeg/.gif/.webp/.svg/.bmp/.ico/.avif`），返回 `Cache-Control: no-store` 以支持图片实时更新。
 
 ---
 
-## 4. 实施计划与当前进度
+## 4. 视觉与交互设计现状（Codex + Fluent 2 融合风格）
 
-### ✅ 已完成部分（Phase 1：工程基建与离线渲染资源就绪）
-1. **本机环境与离线源配置**：
-   - 验证 Windows 11 原生 Mica 支持、`.NET 10.0.115` SDK 与系统内置 `WebView2 Runtime (157.0.4341.60)`。
-   - 建立解决方案 [`MarkdownReader.sln`](<MarkdownReader.sln>)、离线包源配置 [`NuGet.Config`](<NuGet.Config>) 及主工程 [`MarkdownReader.csproj`](<src/MarkdownReader/MarkdownReader.csproj>)。
-   - 完成 `WPF-UI 4.3.0`、`Microsoft.Web.WebView2 1.0.3179.45`、`CommunityToolkit.Mvvm 8.4.2` 本地包还原验证（耗时约 4 秒，零外网依赖）。
-2. **全套离线排版与高亮引擎抽取（`Assets/Web/vendor`）**：
-   - 核心解析与数学包：就绪 [`vendor.js`](<src/MarkdownReader/Assets/Web/vendor/vendor.js>)（内置 `micromark` + `mdast-util-from-markdown` GFM/Math/CJK 扩展、`KaTeX` 核心、`Shiki` 核心引擎）。
-   - 数学公式样式与字体：就绪 [`katex.css`](<src/MarkdownReader/Assets/Web/vendor/katex.css>) 及 `Assets/Web/vendor/fonts/` 下的 **22 个 WOFF2 字体文件**。
-   - 多语言代码高亮语法库：在 `Assets/Web/vendor/langs/` 下完成 **59 种编程语言语法模块**（含 C#、C/C++、Python、Rust、Go、TypeScript/JS、SQL、PowerShell、LaTeX、Diff、Markdown、YAML 等）的去哈希规范化与相对导入路径修复。
+相比最初的纯平云母草图，当前视觉体系已完成向 **Codex 桌面端 + Windows 11 Fluent 2** 的演进定型：
 
-### ✅ 已完成部分（Phase 2–4 及 Codex / Fluent 视觉精修）
+- **双层空间层次**：
+  - 外框采用原生 `Mica`（浅色）/ `Tabbed`（深色）与 40px 无边框幽灵图标标题栏，侧栏（228px）直接融入云母基底，全部文字与树节点绑定 `DynamicResource` 确保浅/深色切换即时联动。
+  - 主阅读区采用内嵌 `10px` 圆角半透明纸面容器（`SheetContainer`：浅色 `rgba(252,252,253,0.84)`、深色 `rgba(24,26,31,0.77)` + 极细 1px 边框），视觉干净聚焦。
+- **自由视幅与隐形导轨**：
+  - 支持 `Aa` 面板三档预设（标准 `760px` / 舒展 `980px` / 自适应满宽 `0`）与正文左右 24px 边缘拖拽无级调节（`620–1800px`，双击恢复 `820px`）。
+  - 左右拉伸渐变提示线默认完全隐形（`opacity: 0`），仅鼠标悬停热区或拖拽时柔和显现，保证阅读零干扰。
+- **悬浮毛玻璃大纲（Floating Outline Card）**：
+  - 右侧固定 `236px` 圆角毛玻璃悬浮卡，高度随标题数量自适应，支持一键收起为右上角轻量胶囊。
+  - 标题文本包裹于内部 `<span>` 承载 2 行截断（`line-height: 1.42`），彻底杜绝长标题第三行像素溢出。
+- **Notion 风格紧凑代码块**：
+  - 取消固定通栏顶栏，改为悬停时右上角浮现毛玻璃胶囊工具栏（美化语言名 + 一键复制 + 自动换行切换 + 折叠切换）。
+  - 行高 `1.66`、字号 `0.82em`、内边距 `18px 20px`，中文字体回退补齐 `Microsoft YaHei UI`；超过 `26` 行的长代码默认折叠至 `400px`（`Ctrl+F` 搜索命中折叠内部时自动展开）。
+- **高效面板与历史管理**：
+  - 顶部三枚浮层按钮支持重复点击 Toggle 关闭，排版/主题面板支持点击外部空白区域自动收起。
+  - 「最近查阅」在左侧导航栏与欢迎页双端同步，支持单条悬停 `×` 移除、右键菜单移除、一键清空以及可选「点击旧文档时自动置顶」（默认关闭）。
+- **Mermaid 离线图表与通用缩放灯箱**：
+  - 仅在文档包含 ```` ```mermaid ```` 块时才动态加载本地 `vendor/mermaid.min.js`，零常驻启动开销；切换浅/深色主题时自动按 Folio 调色板重绘。
+  - 悬浮胶囊工具栏支持「图表 / 源码切换」「复制源码」「放大查看」；AI 流式编辑语法未闭合时静默回退源码展示，保存闭合后自动恢复图表。
+  - 点击 Mermaid 图表或正文任意图片可呼出全屏毛玻璃灯箱（`#lightbox`），支持滚轮缩放（25%–500%）、鼠标拖拽平移、双击重置 1:1 及 `Esc` / 点击空白关闭。
+- **LaTeX (`.tex`) 离线流式阅读**：
+  - 通过 `latex.js` 将 `.tex` 实时转换为与 Markdown 共用的 MDAST 节点，原生享有 KaTeX 数学渲染（含单文件 `\newcommand` / `\DeclareMathOperator` 宏透传）、Shiki 代码高亮（`lstlisting`/`minted`/`verbatim`）、本地图片代理（`\includegraphics`）、右侧悬浮大纲、字体/视幅切换与 Agent 块级热同步；遇到 TikZ 等复杂自定义环境自动降级为可折叠 LaTeX 源码块。
 
-- **Phase 2：WPF 原生云母宿主与核心服务层（C#）** ✅
-  - 实现 `PortableStateService`：在程序同级 `data/state.json` 读写最近打开文档列表、上次打开的文件夹、窗口尺寸位置、主题（跟随系统/浅色/深色）与字号/字体/页宽配置；将 WebView2 用户数据目录重定向至 `./data/webview2` 确保纯粹便携。
-  - 实现 `LiveFileWatcherService`：封装 `FileSystemWatcher`，监听目标文档及目录变动，内置 **120ms 防抖** 与 **文件占用重试读取机制**（完美应对 AI Agent 先写临时文件再 Rename 覆盖或短时文件锁场景）。
-  - 实现 `WorkspaceTreeService`：递归扫描导入文件夹中的 `.md` / `.markdown` 文档结构，支持快速过滤。
-  - 构建 `MainWindow.xaml`（`FluentWindow`）：原生 Mica 背景、自定义沉浸标题栏、可折叠左侧「最近查阅 / 文件夹树」侧栏、文件与文件夹选择对话框、全局窗口拖拽导入（Drag & Drop）及命令行启动参数解析。
+---
 
-- **Phase 3：高精度透明排版核与交互界面（Web Canvas）** ✅
-  - 编写 `Assets/Web/index.html`、`styles.css`、`renderer.js`：
-    - **初始欢迎页（Empty State）**：未打开文档时展示清爽的拖拽导入引导区、打开文件/文件夹快捷入口、最近打开文档卡片列表，以及一键体验「内置全特性排版示例文档」按钮。
-    - **全语法渲染管线**：MDAST 转高精度语义 HTML，支持标题锚点提取、KaTeX 行内 `$...$` / 块级 `$$...$$`（及 `\(...\)`、`\[...\]`）公式渲染、Shiki 59 语言动态高亮 + 一键复制 + Unified Diff 增删着色、5 类 GFM Notice 提示块、精致引用与自适应表格。
-    - **Agent 实时差量同步**：接收 C# 推送的最新 Markdown 源码，按顶层块比对更新 DOM，严格保持当前阅读滚动锚点，并对新增/修改块施加左侧青玉微光提示。
-    - **阅读辅助工具与视觉体验**：内嵌圆角画布（Codex / Fluent 2 风格）、右侧圆角毛玻璃自适应悬浮大纲（支持折叠为胶囊并解决了多行长标题裁切问题）、左右双侧柔和渐变拉伸线支持无级调节阅读宽度、可选「点击旧文档时自动置顶」开关、多尺寸应用图标 `Assets/app.ico`。
+## 5. 迭代进展记录
 
-- **Phase 4：绿色文件夹编译发布与全流程实测** ✅
-  - 执行 Release 编译产出免安装绿色文件夹（如 `./publish/MarkdownReader/`），内置一份涵盖公式、代码块、Diff、5 种 Notice 提示块、引用与表格的演示文档。
-  - 启动程序进行真机运行截图自检（遵循 `frontend-design` 审美标准检查留白、对比度与排版细节），并模拟 Agent 实时修改 `.md` 文件验证无感热刷新效果。
+| 阶段 | 核心交付内容 | 状态 |
+| :--- | :--- | :--- |
+| **Phase 1：工程基建与离线核** | `.NET 10` 工程搭建、`WPF-UI 4.3` / `WebView2` 集成、离线抽取 `micromark` + `KaTeX`（22 字体）+ `Shiki`（59 语言） | ✅ 已完成 |
+| **Phase 2：原生云母宿主与服务层** | `PortableStateService`、`LiveFileWatcherService`、`WorkspaceTreeService`、`MainWindow` 侧栏/拖拽/命令行参数 | ✅ 已完成 |
+| **Phase 3：排版画布与实时同步** | 全语法渲染管线、顶层块级差量热更新与锚点保持、页内查找、欢迎页与排版样张 | ✅ 已完成 |
+| **Phase 4：视觉精修与功能完善** | Codex/Fluent 2 圆角纸面改版、悬浮大纲与长标题修复、隐形边缘调宽、Notion 风格代码块（含自动换行/折叠/行距调优）、本机正文与代码字体自由选择、最近查阅增删清空与可选置顶、浮层 Toggle/外部点击关闭、深色模式侧栏动态色修复、多尺寸 `app.ico` | ✅ 已完成 |
+| **Phase 5：开源发布准备** | `.gitignore` / `.gitattributes` / `LICENSE` / `README.md` 补全与 Release 绿色包验证 | ✅ 已完成 |
+| **Phase 6（v1.1）：阅读记忆、Mermaid 与 LaTeX 支持** | 可选阅读进度记忆（默认关闭，`Aa` 面板开关）、Mermaid 12.3 离线懒加载渲染与通用图片/图表缩放灯箱、`.tex` 离线流式阅读引擎 `latex.js` | ✅ 已完成 |
+
+---
+
+## 6. 后续演进建议（Roadmap）
+
+以下方向按投入产出比与对核心极简定位的契合度排序，可作为后续迭代候选：
+
+1. **多标签页或分屏对照（可选轻量模式）**：在保持单文档极简默认体验的前提下，探索轻量标签栏或双栏对照阅读（适合同时对比多份架构文档或 Diff 稿）。
+2. **导出 PDF / 打印样式优化**：利用 WebView2 原生 `PrintToPdfAsync` 配合 `@media print` 规则，一键导出干净的出版级 PDF（自动隐藏悬浮大纲与交互工具栏）。
+3. **工作区体验增强**：支持在侧栏树中高亮当前打开文档、显示文件相对修改时间或「在资源管理器中定位」右键操作。
+4. **LaTeX 进阶能力**：按需扩展 `\input` / `\include` 同目录多文件内联展开、`\label` + `\ref` 文内锚点跳转与 `.bib` 参考文献悬浮预览。

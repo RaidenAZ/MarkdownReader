@@ -18,6 +18,10 @@ public sealed class PortableStateService
         {
             var state = JsonSerializer.Deserialize<PortableState>(File.ReadAllText(StatePath), Json) ?? new();
             state.Recent = (state.Recent ?? []).Where(File.Exists).Take(12).ToList();
+            state.ReadingProgress = (state.ReadingProgress ?? [])
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && File.Exists(pair.Key) && double.IsFinite(pair.Value) && pair.Value is > 0 and <= 1)
+                .Take(50)
+                .ToDictionary(pair => pair.Key, pair => Math.Clamp(pair.Value, 0, 1), StringComparer.OrdinalIgnoreCase);
             state.Reading = (state.Reading ?? new()).Normalize();
             return state;
         }
@@ -38,6 +42,7 @@ public sealed class PortableStateService
 public sealed class PortableState
 {
     public List<string> Recent { get; set; } = [];
+    public Dictionary<string, double> ReadingProgress { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? Workspace { get; set; }
     public WindowPlacement? Window { get; set; }
     public ReadingSettings Reading { get; set; } = new();
@@ -52,6 +57,7 @@ public sealed record ReadingSettings(
     int ContentWidth = 820,
     bool OutlineOpen = true,
     bool AutoPromoteRecent = false,
+    bool RememberProgress = false,
     string BodyFont = "",
     string CodeFont = "")
 {

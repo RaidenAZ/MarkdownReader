@@ -16,6 +16,11 @@ public static class WorkspaceTreeService
         Path.GetExtension(path).Equals(".md", StringComparison.OrdinalIgnoreCase) ||
         Path.GetExtension(path).Equals(".markdown", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsLatex(string path) =>
+        Path.GetExtension(path).Equals(".tex", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsSupportedDocument(string path) => IsMarkdown(path) || IsLatex(path);
+
     public static WorkspaceEntry Scan(string path) => new(
         Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path,
         path,
@@ -25,7 +30,7 @@ public static class WorkspaceTreeService
             .Select(Scan)
             .Where(entry => entry.Children.Count > 0)
             .Concat(Directory.EnumerateFiles(path, "*", Options)
-                .Where(IsMarkdown)
+                .Where(IsSupportedDocument)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .Select(file => new WorkspaceEntry(Path.GetFileName(file), file, true, [])))
             .ToArray());

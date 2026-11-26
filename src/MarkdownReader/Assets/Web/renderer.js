@@ -3,6 +3,7 @@ import {
   d as attention, f as fromMarkdown, g as gfm, k as katex, m as math, p as typescript, q as json,
   r as gfmFromMarkdown, s as shellscript, v as mathFromMarkdown
 } from "./vendor/vendor.js";
+import { parseLatexToMdast } from "./latex.js";
 
 const element = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -22,6 +23,11 @@ const welcome = byId("welcome");
 const query = byId("query");
 const widthToast = byId("width-toast");
 const panels = { find: byId("find-panel"), typography: byId("typography-panel"), theme: byId("theme-panel") };
+const lightbox = byId("lightbox");
+const lightboxStage = byId("lightbox-stage");
+const lightboxContent = byId("lightbox-content");
+const lightboxScale = byId("lightbox-scale");
+const lightboxCaption = byId("lightbox-caption");
 const notice = byId("notice");
 const matches = new Highlight();
 const currentMatch = new Highlight();
@@ -31,11 +37,17 @@ CSS.highlights.set("folio-current", currentMatch);
 let activeDocument;
 let blocks = [];
 let headings = [];
-let reading = { theme: "system", font: "sans", fontSize: 17, contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, bodyFont: "", codeFont: "" };
+let activeMacros = {};
+let reading = { theme: "system", font: "sans", fontSize: 17, contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, rememberProgress: false, bodyFont: "", codeFont: "" };
 let findIndex = -1;
 let noticeTimer;
 let widthToastTimer;
+let progressTimer;
 let scrollFrame;
+let mermaidLoader;
+let mermaidTheme;
+let mermaidCounter = 0;
+let lightboxState = { scale: 1, x: 0, y: 0 };
 
 const bridge = window.chrome.webview;
 const send = (action, fields) => bridge.postMessage({ action, ...fields });
@@ -142,7 +154,160 @@ const highlighter = createHighlighterCore({
   themes: [createCssVariablesTheme()], langs: [], engine: createJavaScriptRegexEngine()
 });
 
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  mermaidLoader ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "./vendor/mermaid.min.js";
+    script.onload = () => window.mermaid ? resolve(window.mermaid) : reject(new Error("Mermaid unavailable"));
+    script.onerror = () => {
+      mermaidLoader = undefined;
+      reject(new Error("Failed to load mermaid"));
+    };
+    document.head.append(script);
+  });
+  return mermaidLoader;
+}
+
+function configureMermaid(mermaid, dark) {
+  const mode = dark ? "dark" : "light";
+  if (mermaidTheme === mode) return;
+  mermaidTheme = mode;
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    suppressErrorRendering: true,
+    theme: "base",
+    themeVariables: dark ? {
+      darkMode: true,
+      background: "transparent",
+      primaryColor: "#252c38",
+      primaryTextColor: "#e7eaf0",
+      primaryBorderColor: "#4b5568",
+      lineColor: "#8b98ad",
+      secondaryColor: "#1d2430",
+      tertiaryColor: "#1a202b",
+      fontFamily: "Segoe UI Variable Text, Microsoft YaHei UI, sans-serif"
+    } : {
+      darkMode: false,
+      background: "transparent",
+      primaryColor: "#f3f6fb",
+      primaryTextColor: "#1f2329",
+      primaryBorderColor: "#cbd5e1",
+      lineColor: "#64748b",
+      secondaryColor: "#f8fafc",
+      tertiaryColor: "#f1f5f9",
+      fontFamily: "Segoe UI Variable Text, Microsoft YaHei UI, sans-serif"
+    }
+  });
+}
+
+async function renderMermaidCanvas(frame, source) {
+  const canvas = frame.querySelector(".mermaid-canvas");
+  const dark = document.documentElement.dataset.theme === "dark";
+  try {
+    const mermaid = await loadMermaid();
+    configureMermaid(mermaid, dark);
+    const { svg } = await mermaid.render(`folio-mmd-${++mermaidCounter}`, source);
+    if (!frame.isConnected) return;
+    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+    if (parsed.tagName.toLowerCase() !== "svg") throw new Error("Invalid SVG");
+    canvas.replaceChildren(document.importNode(parsed, true));
+    frame.classList.remove("is-error");
+    if (frame.dataset.manualSource !== "true") frame.classList.remove("is-source");
+  } catch {
+    if (!frame.isConnected) return;
+    frame.classList.add("is-error", "is-source");
+  }
+}
+
+function refreshMermaidDiagrams() {
+  for (const frame of article.querySelectorAll(".mermaid-block")) {
+    if (frame.dataset.mermaidSource) renderMermaidCanvas(frame, frame.dataset.mermaidSource);
+  }
+}
+
+function renderMermaid(source) {
+  const frame = element("div", "mermaid-block");
+  frame.dataset.mermaidSource = source;
+  const toolbar = element("div", "code-toolbar");
+  const langTag = element("span", "code-lang", "Mermaid");
+
+  const copy = element("button", "code-tool");
+  copy.type = "button";
+  copy.title = "复制 Mermaid 源码";
+  copy.setAttribute("aria-label", copy.title);
+  const setCopyIcon = copied => {
+    copy.classList.toggle("is-copied", copied);
+    copy.replaceChildren(iconSvg(copied
+      ? ["M3.2 8.5L6.5 11.8L12.8 4.6"]
+      : ["M5.8 5.8H12.2A1.3 1.3 0 0 1 13.5 7.1V12.2A1.3 1.3 0 0 1 12.2 13.5H5.8A1.3 1.3 0 0 1 4.5 12.2V7.1A1.3 1.3 0 0 1 5.8 5.8Z",
+         "M10.5 4.5V3.6A1.1 1.1 0 0 0 9.4 2.5H3.6A1.1 1.1 0 0 0 2.5 3.6V9.4A1.1 1.1 0 0 0 3.6 10.5H4.5"]));
+  };
+  setCopyIcon(false);
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(source);
+      setCopyIcon(true);
+      setTimeout(() => setCopyIcon(false), 1400);
+    } catch {
+      showNotice("无法访问剪贴板");
+    }
+  });
+
+  const sourceToggle = element("button", "code-tool");
+  sourceToggle.type = "button";
+  sourceToggle.title = "切换图表 / 源码";
+  sourceToggle.setAttribute("aria-label", sourceToggle.title);
+  sourceToggle.setAttribute("aria-pressed", "false");
+  sourceToggle.append(iconSvg(["M5.5 4.5L2.2 8L5.5 11.5", "M10.5 4.5L13.8 8L10.5 11.5", "M9 3.5L7 12.5"]));
+  sourceToggle.addEventListener("click", () => {
+    const showSource = frame.classList.toggle("is-source");
+    frame.dataset.manualSource = String(showSource);
+    sourceToggle.setAttribute("aria-pressed", String(showSource));
+  });
+
+  const zoom = element("button", "code-tool");
+  zoom.type = "button";
+  zoom.title = "放大查看图表";
+  zoom.setAttribute("aria-label", zoom.title);
+  zoom.append(iconSvg(["M3 6.2V3H6.2", "M9.8 3H13V6.2", "M13 9.8V13H9.8", "M6.2 13H3V9.8"]));
+  const openDiagramLightbox = () => {
+    const svg = frame.querySelector(".mermaid-canvas svg");
+    if (svg) openLightbox(svg.cloneNode(true), "Mermaid 图表", true);
+  };
+  zoom.addEventListener("click", openDiagramLightbox);
+
+  const status = element("div", "mermaid-status", "图表语法暂未闭合，已回退显示源码");
+  const canvas = element("div", "mermaid-canvas");
+  canvas.addEventListener("click", openDiagramLightbox);
+  const pre = element("pre", "mermaid-source");
+  pre.append(element("code", "", source));
+
+  toolbar.append(langTag, element("i", "code-tool-sep"), sourceToggle, copy, zoom);
+  frame.append(toolbar, status, canvas, pre);
+  queueMicrotask(() => renderMermaidCanvas(frame, source));
+  return frame;
+}
+
+function updateLightboxTransform() {
+  lightboxContent.style.transform = `translate(${lightboxState.x}px, ${lightboxState.y}px) scale(${lightboxState.scale})`;
+  lightboxScale.textContent = `${Math.round(lightboxState.scale * 100)}%`;
+}
+
+function openLightbox(node, caption, isDiagram = false) {
+  lightboxState = { scale: 1, x: 0, y: 0 };
+  lightboxCaption.textContent = caption || "";
+  lightboxContent.classList.toggle("is-diagram", isDiagram);
+  lightboxContent.replaceChildren(node);
+  updateLightboxTransform();
+  if (!lightbox.open) lightbox.showModal();
+}
+
 function renderCode(block) {
+  const rawLabel = (block.lang || "").toLowerCase();
+  if (rawLabel === "mermaid") return renderMermaid(block.value);
+
   const frame = element("div", "code-block");
   const toolbar = element("div", "code-toolbar");
   const label = (block.lang || "").toLowerCase();
@@ -284,7 +449,7 @@ function renderNode(node, definitions) {
     case "math": {
       const block = node.type === "math";
       const target = element(block ? "div" : "span", block ? "math-display" : "math-inline");
-      katex.render(node.value, target, { displayMode: block, throwOnError: false, trust: false });
+      katex.render(node.value, target, { displayMode: block, throwOnError: false, trust: false, macros: { ...activeMacros } });
       return target;
     }
     case "list": {
@@ -364,32 +529,60 @@ function renderNode(node, definitions) {
   }
 }
 
-function renderDocument(incoming, live) {
+function saveReadingProgress() {
+  clearTimeout(progressTimer);
+  progressTimer = undefined;
+  if (!reading.rememberProgress || !activeDocument || activeDocument.isExample || !activeDocument.path) return;
+  const maxScroll = manuscript.scrollHeight - manuscript.clientHeight;
+  const ratio = maxScroll > 0 && manuscript.scrollTop >= 40 ? Math.min(1, manuscript.scrollTop / maxScroll) : 0;
+  send("progress", { path: activeDocument.path, ratio });
+}
+
+function scheduleProgressSave() {
+  if (!reading.rememberProgress || !activeDocument || activeDocument.isExample || !activeDocument.path) return;
+  clearTimeout(progressTimer);
+  progressTimer = setTimeout(saveReadingProgress, 500);
+}
+
+function renderDocument(incoming, live, savedProgress) {
   live = live && activeDocument?.path === incoming.path;
+  if (!live) saveReadingProgress();
   activeDocument = incoming;
   welcome.hidden = true;
   manuscript.hidden = false;
 
-  const nodes = fromMarkdown(incoming.text, parseOptions).children;
-  const definitions = new Map();
-  function prepareNodes(tree) {
-    for (const node of tree) {
-      if (node.type === "definition" && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
-      if (node.type === "paragraph") {
-        const source = incoming.text.slice(node.position.start.offset, node.position.end.offset);
-        if (/^\\\[[ \t]*\r?\n/.test(source) && /\r?\n[ \t]*\\\]$/.test(source)) {
-          node.type = "math";
-          node.value = source.slice(2, -2).trim();
-          delete node.children;
-        }
-      }
-      if (node.children) prepareNodes(node.children);
-    }
+  const isLatex = incoming.format === "latex";
+  let nodes;
+  if (isLatex) {
+    const parsed = parseLatexToMdast(incoming.text);
+    nodes = parsed.children;
+    activeMacros = parsed.macros;
+  } else {
+    nodes = fromMarkdown(incoming.text, parseOptions).children;
+    activeMacros = {};
   }
-  prepareNodes(nodes);
+  const definitions = new Map();
+  if (!isLatex) {
+    function prepareNodes(tree) {
+      for (const node of tree) {
+        if (node.type === "definition" && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
+        if (node.type === "paragraph") {
+          const source = incoming.text.slice(node.position.start.offset, node.position.end.offset);
+          if (/^\\\[[ \t]*\r?\n/.test(source) && /\r?\n[ \t]*\\\]$/.test(source)) {
+            node.type = "math";
+            node.value = source.slice(2, -2).trim();
+            delete node.children;
+          }
+        }
+        if (node.children) prepareNodes(node.children);
+      }
+    }
+    prepareNodes(nodes);
+  }
+  const macroSignature = isLatex ? JSON.stringify(activeMacros) : "";
   const next = nodes.filter(node => node.type !== "definition").map(node => ({
     node,
-    signature: JSON.stringify(node, (key, value) => {
+    signature: macroSignature + JSON.stringify(node, (key, value) => {
       if (key === "position") return undefined;
       if (key === "identifier" && definitions.has(value)) {
         const definition = definitions.get(value);
@@ -443,6 +636,15 @@ function renderDocument(incoming, live) {
   byId("metadata").textContent = `${dateFormat.format(new Date(incoming.updated))} · 约 ${numberFormat.format(minutes)} 分钟阅读`;
   updateOutline();
   if (!live || anchorIndex < 0) manuscript.scrollTop = 0;
+  if (!live && reading.rememberProgress && typeof savedProgress === "number" && savedProgress > 0) {
+    requestAnimationFrame(() => {
+      const maxScroll = manuscript.scrollHeight - manuscript.clientHeight;
+      if (maxScroll > 0) {
+        manuscript.scrollTop = Math.round(maxScroll * Math.min(1, savedProgress));
+        refreshActiveHeading();
+      }
+    });
+  }
   if (anchor && next.length > 0) {
     const priorAnchor = blocks.slice(0, anchorIndex).reverse().find(block => retained.has(block.element));
     const fallback = priorAnchor
@@ -503,6 +705,7 @@ manuscript.addEventListener("scroll", () => {
     scrollFrame = undefined;
     refreshActiveHeading();
   });
+  scheduleProgressSave();
 }, { passive: true });
 
 function findInPage(jump = false) {
@@ -513,7 +716,7 @@ function findInPage(jump = false) {
     for (const block of article.children) {
       const parts = [];
       const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-        acceptNode: node => node.parentElement.closest(".code-toolbar, .code-expand, .katex-mathml, [aria-hidden]:not(.katex-html, .katex-html *)")
+        acceptNode: node => node.parentElement.closest(".code-toolbar, .code-expand, .mermaid-status, .mermaid-canvas, .katex-mathml, [aria-hidden]:not(.katex-html, .katex-html *)")
           ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
       });
       while (walker.nextNode()) parts.push(walker.currentNode);
@@ -599,8 +802,9 @@ function syncFontSelect(select, value) {
 }
 
 function applySettings(settings, dark) {
-  reading = { contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, bodyFont: "", codeFont: "", ...settings };
+  reading = { contentWidth: 820, outlineOpen: true, autoPromoteRecent: false, rememberProgress: false, bodyFont: "", codeFont: "", ...settings };
   const root = document.documentElement;
+  const themeChanged = root.dataset.theme !== (dark ? "dark" : "light");
   root.dataset.theme = dark ? "dark" : "light";
   root.dataset.font = reading.font;
   const fullWidth = reading.contentWidth === 0;
@@ -628,7 +832,9 @@ function applySettings(settings, dark) {
     button.setAttribute("aria-pressed", String(active));
   }
   byId("promote-recent-switch")?.setAttribute("aria-checked", String(Boolean(reading.autoPromoteRecent)));
+  byId("remember-progress-switch")?.setAttribute("aria-checked", String(Boolean(reading.rememberProgress)));
   syncOutlineLayout();
+  if (themeChanged) refreshMermaidDiagrams();
 }
 
 function syncOutlineLayout() {
@@ -685,6 +891,14 @@ document.addEventListener("click", event => {
   for (const panel of [panels.typography, panels.theme]) {
     if (panel.open && !panel.contains(event.target)) panel.close();
   }
+  const image = event.target.closest("#article img");
+  if (image && image.src) {
+    const clone = element("img");
+    clone.src = image.src;
+    clone.alt = image.alt || "";
+    openLightbox(clone, image.alt || image.title || "图片预览", false);
+    return;
+  }
   const button = event.target.closest("button");
   if (button?.dataset.action) send(button.dataset.action, { path: button.dataset.path });
   if (button?.hasAttribute("data-close")) button.closest("dialog").close();
@@ -716,7 +930,10 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape") for (const panel of Object.values(panels)) panel.close();
+  if (event.key === "Escape") {
+    if (lightbox.open) lightbox.close();
+    for (const panel of Object.values(panels)) panel.close();
+  }
   if (!event.ctrlKey || event.altKey || event.metaKey) return;
   const key = event.key.toLowerCase();
   if (key === "f") showPanel("find", false);
@@ -746,6 +963,57 @@ byId("promote-recent-switch").addEventListener("click", () => {
   applySettings(reading, document.documentElement.dataset.theme === "dark");
   send("settings", { reading });
 });
+byId("remember-progress-switch").addEventListener("click", () => {
+  reading = { ...reading, rememberProgress: !reading.rememberProgress };
+  applySettings(reading, document.documentElement.dataset.theme === "dark");
+  send("settings", { reading });
+  if (reading.rememberProgress) saveReadingProgress();
+});
+const zoomLightbox = delta => {
+  lightboxState.scale = Math.min(5, Math.max(0.25, Number((lightboxState.scale + delta).toFixed(2))));
+  updateLightboxTransform();
+};
+byId("lightbox-zoom-in").addEventListener("click", () => zoomLightbox(0.25));
+byId("lightbox-zoom-out").addEventListener("click", () => zoomLightbox(-0.25));
+byId("lightbox-reset").addEventListener("click", () => {
+  lightboxState = { scale: 1, x: 0, y: 0 };
+  updateLightboxTransform();
+});
+lightboxStage.addEventListener("wheel", event => {
+  event.preventDefault();
+  zoomLightbox(event.deltaY < 0 ? 0.15 : -0.15);
+}, { passive: false });
+lightboxStage.addEventListener("pointerdown", event => {
+  if (event.button !== 0) return;
+  if (event.target === lightboxStage) {
+    lightbox.close();
+    return;
+  }
+  lightboxStage.setPointerCapture(event.pointerId);
+  lightboxStage.classList.add("is-panning");
+  const startX = event.clientX - lightboxState.x;
+  const startY = event.clientY - lightboxState.y;
+  const onMove = moveEvent => {
+    lightboxState.x = moveEvent.clientX - startX;
+    lightboxState.y = moveEvent.clientY - startY;
+    updateLightboxTransform();
+  };
+  const onEnd = () => {
+    lightboxStage.classList.remove("is-panning");
+    lightboxStage.removeEventListener("pointermove", onMove);
+    lightboxStage.removeEventListener("pointerup", onEnd);
+    lightboxStage.removeEventListener("pointercancel", onEnd);
+  };
+  lightboxStage.addEventListener("pointermove", onMove);
+  lightboxStage.addEventListener("pointerup", onEnd);
+  lightboxStage.addEventListener("pointercancel", onEnd);
+});
+lightboxStage.addEventListener("dblclick", () => {
+  lightboxState = { scale: 1, x: 0, y: 0 };
+  updateLightboxTransform();
+});
+
+window.addEventListener("pagehide", saveReadingProgress);
 window.addEventListener("resize", syncOutlineLayout);
 
 for (const rail of document.querySelectorAll(".resize-rail")) {
@@ -803,8 +1071,9 @@ bridge.addEventListener("message", event => {
     case "settings": applySettings(message.reading, message.dark); break;
     case "panel": showPanel(message.panel); break;
     case "error": showNotice(message.message); break;
-    case "document": renderDocument(message.document, message.live); break;
+    case "document": renderDocument(message.document, message.live, message.progress); break;
     case "home":
+      saveReadingProgress();
       activeDocument = undefined;
       blocks = [];
       headings = [];
