@@ -1,20 +1,66 @@
 const mathEnvs = new Set([
   "equation", "equation*", "align", "align*", "gather", "gather*",
-  "multline", "multline*", "flalign", "flalign*", "alignat", "alignat*", "displaymath"
+  "multline", "multline*", "flalign", "flalign*", "alignat", "alignat*", "eqnarray", "eqnarray*", "displaymath", "math"
 ]);
-const theoremLabels = {
+const defaultTheoremLabels = {
   theorem: "定理", lemma: "引理", proposition: "命题", corollary: "推论",
   definition: "定义", remark: "注", example: "例", axiom: "公理",
-  conjecture: "猜想", proof: "证明", abstract: "摘要"
+  conjecture: "猜想", proof: "证明", abstract: "摘要", notation: "记号", acknowledgments: "致谢",
+  thm: "Theorem", lem: "Lemma", prop: "Proposition", cor: "Corollary",
+  defn: "Definition", rem: "Remark", ax: "Axiom"
+};
+const symbolAccentTable = {
+  '"': { a: "ä", e: "ë", i: "ï", o: "ö", u: "ü", y: "ÿ", A: "Ä", E: "Ë", I: "Ï", O: "Ö", U: "Ü" },
+  "'": { a: "á", c: "ć", e: "é", i: "í", n: "ń", o: "ó", s: "ś", u: "ú", y: "ý", z: "ź", A: "Á", E: "É", I: "Í", O: "Ó", U: "Ú" },
+  "`": { a: "à", e: "è", i: "ì", o: "ò", u: "ù", A: "À", E: "È", I: "Ì", O: "Ò", U: "Ù" },
+  "^": { a: "â", e: "ê", i: "î", o: "ô", u: "û", A: "Â", E: "Ê", I: "Î", O: "Ô", U: "Û" },
+  "~": { a: "ã", n: "ñ", o: "õ", A: "Ã", N: "Ñ", O: "Õ" },
+  "=": { a: "ā", e: "ē", i: "ī", o: "ō", u: "ū" }
+};
+const cmdAccentTable = {
+  "c": { c: "ç", C: "Ç", s: "ş", S: "Ş" },
+  "v": { c: "č", s: "š", z: "ž", r: "ř", C: "Č", S: "Š", Z: "Ž" }
+};
+const builtinMathMacros = {
+  "\\iiiint": "\\int\\!\\!\\!\\int\\!\\!\\!\\int\\!\\!\\!\\int",
+  "\\idotsint": "\\int\\cdots\\int",
+  "\\Hat": "\\hat",
+  "\\Check": "\\check",
+  "\\Tilde": "\\tilde",
+  "\\Acute": "\\acute",
+  "\\Grave": "\\grave",
+  "\\Dot": "\\dot",
+  "\\Ddot": "\\ddot",
+  "\\Breve": "\\breve",
+  "\\Bar": "\\bar",
+  "\\Vec": "\\vec",
+  "\\protect": "",
+  "\\ntt": "\\ttfamily",
+  "\\bslash": "\\backslash ",
+  "\\theequation": "1",
+  "\\alt": "\\lesssim",
+  "\\agt": "\\gtrsim",
+  "\\openone": "\\mathbb{1}"
 };
 const sectionDepth = {
   part: 1, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5, subparagraph: 6
 };
 
 function stripComments(source) {
-  return source.replace(/\r\n?/g, "\n").split("\n").map(line => {
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  let inVerbatim = false;
+  return lines.map(line => {
+    if (/\\begin\s*\{(?:verbatim|lstlisting|minted)\}/.test(line)) inVerbatim = true;
+    if (inVerbatim) {
+      if (/\\end\s*\{(?:verbatim|lstlisting|minted)\}/.test(line)) inVerbatim = false;
+      return line;
+    }
     for (let i = 0; i < line.length; i++) {
-      if (line[i] === "%" && (i === 0 || line[i - 1] !== "\\")) return line.slice(0, i);
+      if (line[i] === "%") {
+        let bs = 0;
+        for (let k = i - 1; k >= 0 && line[k] === "\\"; k--) bs++;
+        if (bs % 2 === 0) return line.slice(0, i);
+      }
     }
     return line;
   }).join("\n");
@@ -39,21 +85,50 @@ function skipSpaces(text, index) {
 function extractMacros(preamble) {
   const textMacros = {};
   const mathMacros = {};
-  const pattern = /\\(?:re)?newcommand\*?\s*\{?(\\[a-zA-Z]+)\}?\s*(?:\[(\d+)\])?\s*\{/g;
+  const theoremLabels = { ...defaultTheoremLabels };
+  const pattern = /\\(?:re)?newcommand\*?\s*\{?(\\[a-zA-Z]+)\}?\s*(?:\[(\d+)\])?\s*/g;
   let match;
   while ((match = pattern.exec(preamble)) !== null) {
     const args = Number(match[2] || 0);
-    const body = readGroup(preamble, match.index + match[0].length - 1);
+    let cursor = match.index + match[0].length;
+    const optDefault = readGroup(preamble, cursor, "[", "]");
+    if (optDefault) cursor = skipSpaces(preamble, optDefault.end);
+    const body = readGroup(preamble, cursor);
     if (!body) continue;
-    mathMacros[match[1]] = body.content;
-    if (args === 0) textMacros[match[1]] = body.content;
+    if (optDefault) {
+      const normalized = body.content
+        .replace(/\\relax/g, "")
+        .replace(/\\ifx\s*#1\\right\s*\\left\.\\fi/g, "\\left.")
+        .replace(/\\ifx[\s\S]*?\\fi/g, "")
+        .replace(/#1/g, optDefault.content)
+        .replace(/#2/g, "#1")
+        .trim();
+      mathMacros[match[1]] = normalized;
+      textMacros[match[1]] = { args: 1, defaultOpt: optDefault.content, body: body.content };
+      continue;
+    }
+    if (args === 0 || !/\\(ifx|protect|normalfont|mbox|rule)/.test(body.content)) {
+      mathMacros[match[1]] = body.content;
+    }
+    textMacros[match[1]] = { args, body: body.content };
   }
   const opPattern = /\\DeclareMathOperator(\*?)\s*\{?(\\[a-zA-Z]+)\}?\s*\{/g;
   while ((match = opPattern.exec(preamble)) !== null) {
     const body = readGroup(preamble, match.index + match[0].length - 1);
     if (body) mathMacros[match[2]] = `\\operatorname${match[1]}{${body.content}}`;
   }
-  return { textMacros, mathMacros };
+  const letPattern = /\\let\s*(\\[a-zA-Z]+)\s*=?\s*(\\[a-zA-Z]+)/g;
+  while ((match = letPattern.exec(preamble)) !== null) {
+    const [, alias, target] = match;
+    if (mathMacros[target]) mathMacros[alias] = mathMacros[target];
+    else mathMacros[alias] = target;
+    if (textMacros[target]) textMacros[alias] = textMacros[target];
+  }
+  const thmPattern = /\\newtheorem\*?\s*\{([^}]+)\}\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g;
+  while ((match = thmPattern.exec(preamble)) !== null) {
+    theoremLabels[match[1].trim().toLowerCase()] = match[2].trim();
+  }
+  return { textMacros, mathMacros: { ...builtinMathMacros, ...mathMacros }, theoremLabels };
 }
 
 function extractMeta(source) {
@@ -81,9 +156,26 @@ function findMatchingEnd(text, envName, fromIndex) {
   return null;
 }
 
+function preprocessMath(raw) {
+  return raw
+    .replace(/\\label\s*\{[^}]*\}/g, "")
+    .replace(/\\nonumber\b/g, "")
+    .replace(/\\shove(?:left|right)\s*\{/g, "{")
+    .replace(/\\(?:leftroot|uproot)\s*\{[^}]*\}/g, "")
+    .replace(/\\hdotsfor\s*(?:\[[^\]]*\])?\s*\{(\d+)\}/g, (_, cols) =>
+      Array.from({ length: Math.max(1, Number(cols)) }, () => "\\dots").join(" & "))
+    .replace(/\\eval\s*\[[^\]]*\]\s*/g, "\\eval")
+    .replace(/\\sideset\s*\{([^}]*)\}\s*\{([^}]*)\}\s*(\\[a-zA-Z]+)/g, "{}^{$1}$3^{$2}")
+    .replace(/\\text\s*\{([^{}]*\\ref\s*\{([^}]*)\}[^{}]*)\}/g, (_, inner) =>
+      `\\text{${inner.replace(/\\ref\s*\{([^}]*)\}/g, "$1")}}`)
+    .replace(/\\text\s*\{\s*\\cn\s*\{([^}]*)\}([^}]*)\}/g, "\\text{\\texttt{\\textbackslash $1}$2}")
+    .replace(/\\cn\s*\{([^}]*)\}/g, "\\texttt{\\textbackslash $1}")
+    .trim();
+}
+
 function textNode(value) { return { type: "text", value }; }
 
-function parseInline(input, macros) {
+function parseInline(input, macros, depth = 0) {
   const nodes = [];
   let buffer = "";
   const flush = () => {
@@ -95,11 +187,20 @@ function parseInline(input, macros) {
 
   let i = 0;
   while (i < input.length) {
+    if (input.startsWith("\\verb", i) && i + 5 < input.length && !/[a-zA-Z]/.test(input[i + 5])) {
+      const delim = input[i + 5];
+      const end = input.indexOf(delim, i + 6);
+      if (end !== -1) {
+        push({ type: "inlineCode", value: input.slice(i + 6, end) });
+        i = end + 1;
+        continue;
+      }
+    }
     if (input[i] === "$" && input[i + 1] !== "$") {
       let end = i + 1;
       while (end < input.length && !(input[end] === "$" && input[end - 1] !== "\\")) end++;
       if (end < input.length) {
-        push({ type: "inlineMath", value: input.slice(i + 1, end).trim() });
+        push({ type: "inlineMath", value: preprocessMath(input.slice(i + 1, end)) });
         i = end + 1;
         continue;
       }
@@ -107,7 +208,15 @@ function parseInline(input, macros) {
     if (input.startsWith("\\(", i)) {
       const end = input.indexOf("\\)", i + 2);
       if (end !== -1) {
-        push({ type: "inlineMath", value: input.slice(i + 2, end).trim() });
+        push({ type: "inlineMath", value: preprocessMath(input.slice(i + 2, end)) });
+        i = end + 2;
+        continue;
+      }
+    }
+    if (input.startsWith("\\[", i)) {
+      const end = input.indexOf("\\]", i + 2);
+      if (end !== -1) {
+        push({ type: "inlineMath", value: preprocessMath(input.slice(i + 2, end)) });
         i = end + 2;
         continue;
       }
@@ -123,6 +232,28 @@ function parseInline(input, macros) {
         i += 2;
         continue;
       }
+      if (input[i + 1] === "@") {
+        i += 2;
+        continue;
+      }
+      if (input[i + 1] === "\n" || input[i + 1] === undefined) {
+        i += 2;
+        continue;
+      }
+      if (symbolAccentTable[input[i + 1]]) {
+        const accent = input[i + 1];
+        let cursor = i + 2;
+        let ch = "";
+        if (input[cursor] === "{") {
+          const grp = readGroup(input, cursor);
+          if (grp) { ch = grp.content.trim(); cursor = grp.end; }
+        } else if (cursor < input.length) {
+          ch = input[cursor++];
+        }
+        buffer += symbolAccentTable[accent][ch] ?? ch;
+        i = cursor;
+        continue;
+      }
       if (/[%$#&_{}]/.test(input[i + 1] || "")) {
         buffer += input[i + 1];
         i += 2;
@@ -132,6 +263,22 @@ function parseInline(input, macros) {
       if (cmdMatch) {
         const cmd = cmdMatch[1];
         let cursor = skipSpaces(input, i + cmdMatch[0].length);
+        if (cmd === "LaTeX") { buffer += "LaTeX"; i += cmdMatch[0].length; continue; }
+        if (cmd === "TeX") { buffer += "TeX"; i += cmdMatch[0].length; continue; }
+        if (cmd === "AmS") { buffer += "AMS"; i += cmdMatch[0].length; continue; }
+        if (cmd === "ldots" || cmd === "dots") { buffer += "…"; i += cmdMatch[0].length; continue; }
+        if (cmd === "S") { buffer += "§"; i += cmdMatch[0].length; continue; }
+        if (cmd === "bslash") { buffer += "\\"; i += cmdMatch[0].length; continue; }
+        if (cmd === "bysame") { buffer += "———"; i += cmdMatch[0].length; continue; }
+        if (cmdAccentTable[cmd]) {
+          const grp = readGroup(input, cursor);
+          if (grp) {
+            const ch = grp.content.trim();
+            buffer += cmdAccentTable[cmd][ch] ?? ch;
+            i = grp.end;
+            continue;
+          }
+        }
         if (cmd === "verb" && i + 5 < input.length) {
           const delim = input[i + 5];
           const end = input.indexOf(delim, i + 6);
@@ -212,17 +359,51 @@ function parseInline(input, macros) {
           i = grp ? grp.end : i + cmdMatch[0].length;
           continue;
         }
-        if (macros[`\\${cmd}`]) {
-          const expanded = macros[`\\${cmd}`];
-          push(...parseInline(expanded, macros));
-          i += cmdMatch[0].length;
-          continue;
+        if (depth < 6 && macros[`\\${cmd}`]) {
+          const def = macros[`\\${cmd}`];
+          if (def.args === 0) {
+            for (const node of parseInline(def.body, macros, depth + 1)) push(node);
+            i += cmdMatch[0].length;
+            continue;
+          }
+          let argCursor = cursor;
+          let endCursor = cursor;
+          const args = [];
+          if (def.defaultOpt !== undefined) {
+            const opt = readGroup(input, argCursor, "[", "]");
+            if (opt) { args.push(opt.content); endCursor = opt.end; argCursor = skipSpaces(input, opt.end); }
+            else args.push(def.defaultOpt);
+          }
+          let ok = true;
+          while (args.length < def.args) {
+            const argGrp = readGroup(input, argCursor);
+            if (!argGrp) { ok = false; break; }
+            args.push(argGrp.content);
+            endCursor = argGrp.end;
+            argCursor = skipSpaces(input, argGrp.end);
+          }
+          if (ok) {
+            let expanded = def.body;
+            args.forEach((val, idx) => { expanded = expanded.replaceAll(`#${idx + 1}`, val); });
+            if (/\\(ntt|ttfamily)/.test(expanded) && !/\\(ref|eqref|cite)\b/.test(expanded)) {
+              const plain = expanded
+                .replace(/\\(?:protect|ntt|normalfont|ttfamily)/g, "")
+                .replace(/\\bslash/g, "\\")
+                .replace(/[{}]/g, "")
+                .trim();
+              push({ type: "inlineCode", value: plain });
+            } else {
+              for (const node of parseInline(expanded, macros, depth + 1)) push(node);
+            }
+            i = endCursor;
+            continue;
+          }
         }
         const grp = readGroup(input, cursor);
-        if (grp && ["textrm", "textsf", "textsc", "underline", "textcolor", "text"].includes(cmd)) {
+        if (grp && ["textrm", "textsf", "textsc", "textup", "underline", "textcolor", "text", "mbox", "lowercase", "uppercase"].includes(cmd)) {
           const contentGrp = cmd === "textcolor" ? readGroup(input, skipSpaces(input, grp.end)) : grp;
           if (contentGrp) {
-            push(...parseInline(contentGrp.content, macros));
+            for (const node of parseInline(contentGrp.content, macros, depth + 1)) push(node);
             i = contentGrp.end;
             continue;
           }
@@ -273,7 +454,7 @@ function parseTabular(body, macros) {
   };
 }
 
-function parseBlocks(body, macros) {
+function parseBlocks(body, macros, theoremLabels) {
   const blocks = [];
   let paragraph = [];
   const flushParagraph = () => {
@@ -292,12 +473,39 @@ function parseBlocks(body, macros) {
       i++;
       continue;
     }
+    if (body[i] === "{") {
+      const grp = readGroup(body, i);
+      if (grp && /\\begin\s*\{|\\\[|\$\$/.test(grp.content)) {
+        flushParagraph();
+        const stripped = grp.content.replace(/^[\s\S]*?(?=\\begin\s*\{|\\\[|\$\$)/, "");
+        blocks.push(...parseBlocks(stripped.trim(), macros, theoremLabels));
+        i = grp.end;
+        continue;
+      }
+    }
+
+    if (/^\\makeatletter\b/.test(body.slice(i))) {
+      const endIdx = body.indexOf("\\makeatother", i + 13);
+      if (endIdx !== -1) {
+        flushParagraph();
+        i = endIdx + 12;
+        continue;
+      }
+    }
+    if (/^\\iffalse\b/.test(body.slice(i))) {
+      const endIdx = body.indexOf("\\fi", i + 8);
+      if (endIdx !== -1) {
+        flushParagraph();
+        i = endIdx + 3;
+        continue;
+      }
+    }
 
     if (body.startsWith("$$", i)) {
       const end = body.indexOf("$$", i + 2);
       if (end !== -1) {
         flushParagraph();
-        blocks.push({ type: "math", value: body.slice(i + 2, end).trim() });
+        blocks.push({ type: "math", value: preprocessMath(body.slice(i + 2, end)) });
         i = end + 2;
         continue;
       }
@@ -306,10 +514,22 @@ function parseBlocks(body, macros) {
       const end = body.indexOf("\\]", i + 2);
       if (end !== -1) {
         flushParagraph();
-        blocks.push({ type: "math", value: body.slice(i + 2, end).trim() });
+        blocks.push({ type: "math", value: preprocessMath(body.slice(i + 2, end)) });
         i = end + 2;
         continue;
       }
+    }
+
+    const skipCmd = /^\\(markboth|renewcommand|newcommand|setlength|pagestyle|thispagestyle|hfuzz|numberwithin)\b/.exec(body.slice(i));
+    if (skipCmd) {
+      let cursor = skipSpaces(body, i + skipCmd[0].length);
+      while (cursor < body.length && (body[cursor] === "{" || body[cursor] === "[")) {
+        const g = body[cursor] === "{" ? readGroup(body, cursor) : readGroup(body, cursor, "[", "]");
+        if (!g) break;
+        cursor = skipSpaces(body, g.end);
+      }
+      i = cursor;
+      continue;
     }
 
     const secMatch = /^\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*/.exec(body.slice(i));
@@ -348,11 +568,34 @@ function parseBlocks(body, macros) {
 
         if (mathEnvs.has(env)) {
           const bare = env.replace(/\*$/, "");
-          const cleanedMath = envBody.replace(/\\label\s*\{[^}]*\}/g, "").trim();
-          const wrapped = bare === "equation" || bare === "displaymath"
+          let cleanedMath = preprocessMath(envBody);
+          if (bare === "eqnarray") cleanedMath = cleanedMath.replace(/\s*&\s*([^&]*?)\s*&\s*/g, " &$1 ");
+          const katexEnv = bare === "multline" ? "gathered" : bare === "flalign" || bare === "eqnarray" ? "align" : bare;
+          const wrapped = katexEnv === "equation" || katexEnv === "displaymath" || katexEnv === "math"
             ? cleanedMath
-            : `\\begin{${bare}*} ${cleanedMath} \\end{${bare}*}`;
+            : katexEnv === "gathered"
+              ? `\\begin{gathered} ${cleanedMath} \\end{gathered}`
+              : `\\begin{${katexEnv}*} ${cleanedMath} \\end{${katexEnv}*}`;
           blocks.push({ type: "math", value: wrapped });
+        } else if (env === "subequations" || env === "widetext" || env === "ruledtabular" || env === "em") {
+          blocks.push(...parseBlocks(envBody.trim(), macros, theoremLabels));
+        } else if (env === "verse") {
+          blocks.push({ type: "blockquote", children: parseBlocks(envBody.trim(), macros, theoremLabels) });
+        } else if (env === "thebibliography") {
+          const widthArg = readGroup(envBody, skipSpaces(envBody, 0));
+          const bibBody = widthArg ? envBody.slice(widthArg.end) : envBody;
+          const entries = bibBody.split(/\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/);
+          const items = [];
+          for (let idx = 1; idx < entries.length; idx += 2) {
+            const key = entries[idx].trim();
+            const content = (entries[idx + 1] || "").replace(/\s+/g, " ").trim();
+            items.push({
+              type: "listItem",
+              children: [{ type: "paragraph", children: [{ type: "inlineCode", value: `[${key}]` }, textNode(" "), ...parseInline(content, macros)] }]
+            });
+          }
+          blocks.push({ type: "heading", depth: 2, children: [textNode("References")] });
+          if (items.length) blocks.push({ type: "list", ordered: false, children: items });
         } else if (env === "itemize" || env === "enumerate" || env === "description") {
           blocks.push(parseList(envBody, env === "enumerate", macros));
         } else if (env === "verbatim" || env === "lstlisting" || env === "minted") {
@@ -369,11 +612,11 @@ function parseBlocks(body, macros) {
           }
           blocks.push({ type: "code", lang: codeLang, value: envBody.replace(/^\n|\n$/g, "") });
         } else if (env === "quote" || env === "quotation") {
-          blocks.push({ type: "blockquote", children: parseBlocks(envBody.trim(), macros) });
+          blocks.push({ type: "blockquote", children: parseBlocks(envBody.trim(), macros, theoremLabels) });
         } else if (env === "tabular") {
           const colSpec = readGroup(envBody, skipSpaces(envBody, 0));
           blocks.push(parseTabular(colSpec ? envBody.slice(colSpec.end) : envBody, macros));
-        } else if (env === "figure" || env === "table" || env === "center") {
+        } else if (env === "figure" || env === "figure*" || env === "table" || env === "table*" || env === "center" || env === "video") {
           const captionMatch = /\\caption\s*\{/.exec(envBody);
           let caption = "";
           if (captionMatch) {
@@ -383,15 +626,15 @@ function parseBlocks(body, macros) {
               envBody = envBody.slice(0, captionMatch.index) + envBody.slice(capGrp.end);
             }
           }
-          blocks.push(...parseBlocks(envBody.trim(), macros));
+          blocks.push(...parseBlocks(envBody.trim(), macros, theoremLabels));
           if (caption) blocks.push({ type: "blockquote", children: [{ type: "paragraph", children: parseInline(`\\textbf{图/表注：} ${caption}`, macros) }] });
         } else if (theoremLabels[env.toLowerCase()]) {
           const label = theoremLabels[env.toLowerCase()];
           const heading = optTitle ? `${label}（${optTitle}）` : label;
-          const inner = parseBlocks(envBody.trim(), macros);
+          const inner = parseBlocks(envBody.trim(), macros, theoremLabels);
           blocks.push({
             type: "blockquote",
-            children: [{ type: "paragraph", children: [{ type: "strong", children: [textNode(heading)] }] }, ...inner]
+            children: [{ type: "paragraph", children: [{ type: "strong", children: parseInline(heading, macros) }] }, ...inner]
           });
         } else {
           blocks.push({ type: "code", lang: "latex", value: body.slice(i, endInfo.end).trim() });
@@ -420,12 +663,12 @@ export function parseLatexToMdast(rawText) {
     ? cleaned.slice(docStart.index + docStart[0].length, docEnd ? docEnd.index : cleaned.length)
     : cleaned;
 
-  const { textMacros, mathMacros } = extractMacros(preamble);
+  const { textMacros, mathMacros, theoremLabels } = extractMacros(preamble);
   const meta = extractMeta(cleaned);
   const nodes = [];
   if (meta.title) nodes.push({ type: "heading", depth: 1, children: parseInline(meta.title, textMacros) });
   const subtitle = [meta.author, meta.date].filter(Boolean).join(" · ");
   if (subtitle) nodes.push({ type: "blockquote", children: [{ type: "paragraph", children: parseInline(subtitle, textMacros) }] });
-  nodes.push(...parseBlocks(body.trim(), textMacros));
+  nodes.push(...parseBlocks(body.trim(), textMacros, theoremLabels));
   return { children: nodes, macros: mathMacros };
 }

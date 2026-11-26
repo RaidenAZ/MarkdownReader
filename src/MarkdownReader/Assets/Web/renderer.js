@@ -449,7 +449,7 @@ function renderNode(node, definitions) {
     case "math": {
       const block = node.type === "math";
       const target = element(block ? "div" : "span", block ? "math-display" : "math-inline");
-      katex.render(node.value, target, { displayMode: block, throwOnError: false, trust: false, macros: { ...activeMacros } });
+      katex.render(node.value, target, { displayMode: block, throwOnError: false, strict: false, trust: false, macros: { ...activeMacros } });
       return target;
     }
     case "list": {
