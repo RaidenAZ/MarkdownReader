@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https://media.folio.local; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://media.folio.local; base-uri 'none'; form-action 'none'">
   <title>Folio</title>
   <link rel="stylesheet" href="./vendor/katex.css">
   <link rel="stylesheet" href="./styles.css">
@@ -18,14 +18,14 @@
           <span>Living Manuscript on Mica</span>
         </div>
         <h1 id="welcome-title">Folio</h1>
-        <p class="welcome-lead">安静阅读本地 Markdown 文档，毫秒级无损同步外部编辑。</p>
+        <p class="welcome-lead">安静阅读本地 Markdown 与 LaTeX 文档，毫秒级无损同步外部编辑。</p>
         <div class="import-area">
           <div class="actions">
             <button class="primary" data-action="openFile">打开文件</button>
             <button data-action="openFolder">打开文件夹</button>
             <button class="sample-action" data-action="example">阅读排版样张</button>
           </div>
-          <span class="drop-hint">也可直接将 .md 文件或文件夹拖入窗口任意位置</span>
+          <span class="drop-hint">也可直接将 .md / .tex 文件或文件夹拖入窗口任意位置</span>
         </div>
         <section id="recent-section" hidden>
           <div class="recent-header">
@@ -114,6 +114,15 @@
         <i></i>
       </button>
     </div>
+    <div class="switch-row">
+      <div class="switch-copy">
+        <span>记忆阅读进度</span>
+        <small>重开长文档时自动恢复上次位置</small>
+      </div>
+      <button type="button" id="remember-progress-switch" class="toggle-switch" role="switch" aria-checked="false" aria-label="记忆阅读进度">
+        <i></i>
+      </button>
+    </div>
   </dialog>
   <dialog id="theme-panel" class="settings-panel" aria-labelledby="theme-title">
     <header><strong id="theme-title">主题</strong><button class="icon" data-close aria-label="关闭" title="关闭">×</button></header>
@@ -121,6 +130,21 @@
       <button data-setting="theme" data-value="system">跟随系统</button>
       <button data-setting="theme" data-value="light">浅色</button>
       <button data-setting="theme" data-value="dark">深色</button>
+    </div>
+  </dialog>
+  <dialog id="lightbox" aria-label="图表与图片缩放预览">
+    <div class="lightbox-bar">
+      <span id="lightbox-caption"></span>
+      <div class="lightbox-actions">
+        <button type="button" id="lightbox-zoom-out" class="icon" title="缩小" aria-label="缩小">−</button>
+        <span id="lightbox-scale">100%</span>
+        <button type="button" id="lightbox-zoom-in" class="icon" title="放大" aria-label="放大">+</button>
+        <button type="button" id="lightbox-reset" class="icon" title="重置视图" aria-label="重置视图">1:1</button>
+        <button type="button" data-close class="icon" title="关闭 (Esc)" aria-label="关闭">×</button>
+      </div>
+    </div>
+    <div id="lightbox-stage">
+      <div id="lightbox-content"></div>
     </div>
   </dialog>
   <output id="notice" hidden role="status"></output>

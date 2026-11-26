@@ -67,3 +67,14 @@ function countParagraphs(document: Manuscript): number {
 ### 本地插图
 
 ![原稿经一次修订后进入校对](./example-diagram.svg)
+
+### 离线 Mermaid 图表
+
+```mermaid
+flowchart LR
+  A[本地 .md / .tex] --> B{Folio 离线解析}
+  B --> C[KaTeX 公式]
+  B --> D[Shiki 高亮]
+  B --> E[Mermaid 图表]
+  E --> F((点击缩放灯箱))
+```

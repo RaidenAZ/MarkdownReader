@@ -35,7 +35,7 @@ public partial class MainWindow : FluentWindow
     private bool canvasReady;
     private bool followsSystem;
 
-    private sealed record Document(string? Path, string Name, string Text, DateTime Updated, bool IsExample);
+    private sealed record Document(string? Path, string Name, string Text, DateTime Updated, bool IsExample, string Format = "markdown");
     private sealed record RecentDocument(string Path, bool IsActive)
     {
         public string Name => System.IO.Path.GetFileName(Path);
@@ -161,7 +161,7 @@ public partial class MainWindow : FluentWindow
                 SendSettings();
                 UpdateRecent();
                 if (document is { } current)
-                    Send(new { type = "document", document = current, live = false });
+                    Send(new { type = "document", document = current, live = false, progress = GetSavedProgress(current) });
                 break;
             case "openFile":
                 ChooseFile(this, new RoutedEventArgs());
@@ -200,6 +200,10 @@ public partial class MainWindow : FluentWindow
                 catch (JsonException)
                 {
                 }
+                break;
+            case "progress" when message.TryGetProperty("path", out var progressPath) && progressPath.ValueKind == JsonValueKind.String
+                && message.TryGetProperty("ratio", out var ratioElement) && ratioElement.ValueKind == JsonValueKind.Number:
+                SaveProgress(progressPath.GetString()!, ratioElement.GetDouble());
                 break;
             case "externalLink" when message.TryGetProperty("url", out var link) && link.ValueKind == JsonValueKind.String:
                 if (Uri.TryCreate(link.GetString(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "mailto")
@@ -275,7 +279,7 @@ public partial class MainWindow : FluentWindow
             await OpenWorkspace(System.IO.Path.GetFullPath(path));
             return;
         }
-        if (File.Exists(path) && WorkspaceTreeService.IsMarkdown(path))
+        if (File.Exists(path) && WorkspaceTreeService.IsSupportedDocument(path))
         {
             await OpenDocument(System.IO.Path.GetFullPath(path));
             return;
@@ -297,14 +301,15 @@ public partial class MainWindow : FluentWindow
                 System.IO.Path.GetDirectoryName(path)!, System.IO.Path.GetFileName(path), false,
                 NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size, async () => await ReloadDocument(path));
             document = new Document(path, example ? "Folio 排版样张" : System.IO.Path.GetFileName(path),
-                text, File.GetLastWriteTimeUtc(path), example);
+                text, File.GetLastWriteTimeUtc(path), example,
+                !example && WorkspaceTreeService.IsLatex(path) ? "latex" : "markdown");
             var shortTitle = example ? document.Name : System.IO.Path.GetFileNameWithoutExtension(path);
             DocumentName.Text = string.IsNullOrEmpty(shortTitle) ? document.Name : shortTitle;
             TitleSeparator.Visibility = Visibility.Visible;
             DocumentName.ToolTip = example ? null : path;
             Title = $"{document.Name} · Folio";
             SetWatchStatus(!example);
-            Send(new { type = "document", document, live = false });
+            Send(new { type = "document", document, live = false, progress = GetSavedProgress(document) });
             if (example)
             {
                 UpdateRecent();
@@ -414,7 +419,7 @@ public partial class MainWindow : FluentWindow
             if (Build(child) is { } childItem)
                 WorkspaceTree.Items.Add(childItem);
         WorkspaceHint.Visibility = WorkspaceTree.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        WorkspaceHint.Text = filter.Length > 0 ? "没有匹配的文档" : "文件夹内没有 Markdown 文档";
+        WorkspaceHint.Text = filter.Length > 0 ? "没有匹配的文档" : "文件夹内没有 Markdown / LaTeX 文档";
 
         static int CountFiles(WorkspaceEntry entry) =>
             (entry.IsFile ? 1 : 0) + entry.Children.Sum(CountFiles);
@@ -542,6 +547,26 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    private double? GetSavedProgress(Document current) =>
+        state.Reading.RememberProgress && !current.IsExample && current.Path is { } path &&
+        state.ReadingProgress.TryGetValue(path, out var ratio) ? ratio : null;
+
+    private void SaveProgress(string path, double ratio)
+    {
+        if (!state.Reading.RememberProgress || string.IsNullOrWhiteSpace(path) || !double.IsFinite(ratio))
+            return;
+        if (ratio <= 0.005)
+        {
+            if (state.ReadingProgress.Remove(path))
+                SaveState();
+            return;
+        }
+        state.ReadingProgress[path] = Math.Clamp(ratio, 0, 1);
+        if (state.ReadingProgress.Count > 50)
+            state.ReadingProgress.Remove(state.ReadingProgress.Keys.First(key => !StringComparer.OrdinalIgnoreCase.Equals(key, path)));
+        SaveState();
+    }
+
     private void SaveWindowPlacement(object? sender, System.ComponentModel.CancelEventArgs args)
     {
         var bounds = RestoreBounds;
@@ -565,14 +590,14 @@ public partial class MainWindow : FluentWindow
 
     private async void ChooseFile(object sender, RoutedEventArgs args)
     {
-        var dialog = new OpenFileDialog { Filter = "Markdown (*.md;*.markdown)|*.md;*.markdown" };
+        var dialog = new OpenFileDialog { Filter = "文档 (*.md;*.markdown;*.tex)|*.md;*.markdown;*.tex|Markdown (*.md;*.markdown)|*.md;*.markdown|LaTeX (*.tex)|*.tex" };
         if (dialog.ShowDialog(this) == true)
             await OpenDocument(dialog.FileName);
     }
 
     private async void ChooseFolder(object sender, RoutedEventArgs args)
     {
-        var dialog = new OpenFolderDialog { Title = "打开 Markdown 工作区" };
+        var dialog = new OpenFolderDialog { Title = "打开文档工作区" };
         if (dialog.ShowDialog(this) == true)
             await OpenWorkspace(dialog.FolderName);
     }
@@ -616,7 +641,7 @@ public partial class MainWindow : FluentWindow
     private void DragOverWindow(object sender, DragEventArgs args)
     {
         args.Effects = args.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths &&
-            (Directory.Exists(paths[0]) || WorkspaceTreeService.IsMarkdown(paths[0])) ? DragDropEffects.Copy : DragDropEffects.None;
+            (Directory.Exists(paths[0]) || WorkspaceTreeService.IsSupportedDocument(paths[0])) ? DragDropEffects.Copy : DragDropEffects.None;
         args.Handled = true;
     }
 

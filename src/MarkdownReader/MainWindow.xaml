@@ -189,7 +189,7 @@
                                     <TextBlock Text="最近查阅" FontSize="11.5" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                                 </DockPanel>
-                                <TextBlock x:Name="RecentEmptyHint" Text="拖入 .md 文档即可开始阅读" FontSize="12"
+                                <TextBlock x:Name="RecentEmptyHint" Text="拖入 .md / .tex 文档即可开始阅读" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="10,2,8,8" TextWrapping="Wrap" />
                                 <ItemsControl x:Name="RecentFiles">
                                     <ItemsControl.ItemTemplate>

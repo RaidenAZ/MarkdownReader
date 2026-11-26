@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>MarkdownReader</AssemblyName>
     <RootNamespace>MarkdownReader</RootNamespace>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Product>Folio · Markdown Manuscript Reader</Product>
     <Description>Portable Windows 11 Mica Markdown Reader with Live Agent Sync</Description>
     <ApplicationIcon Condition="Exists('Assets\app.ico')">Assets\app.ico</ApplicationIcon>
